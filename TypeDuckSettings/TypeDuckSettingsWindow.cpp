@@ -666,11 +666,18 @@ class SettingsWindow {
              L"permissions, then reopen this window.";
     }
     if (loaded.source == Moqi::TypeDuck::PreferencesSource::Corrupt) {
+      // 確定 Confirm and the title-bar X are the SAME path: WM_CLOSE calls
+      // confirmAndClose(), exactly as the 確定 Confirm button does, so closing
+      // the window rewrites the file too. Only 取消 Cancel leaves it alone. Say
+      // so, or the X reads as a safe way out.
       return L"設定檔的內容無法解析，現時顯示的是預設值。"
-             L"按「確定 Confirm」會以這些設定重新寫入設定檔。\n\n"
+             L"按「確定 Confirm」，或按右上角的「X」關閉本視窗，"
+             L"都會以這些設定重新寫入設定檔。"
+             L"若不想改寫設定檔，請按「取消 Cancel」。\n\n"
              L"The settings file could not be parsed, so the values shown here "
-             L"are defaults. Choosing 確定 Confirm will rewrite the file with "
-             L"them.";
+             L"are defaults. Choosing 確定 Confirm, or closing this window with "
+             L"the X, will rewrite the file with them. Choose 取消 Cancel to "
+             L"leave the file as it is.";
     }
     return utf8ToWide(loaded.message);
   }

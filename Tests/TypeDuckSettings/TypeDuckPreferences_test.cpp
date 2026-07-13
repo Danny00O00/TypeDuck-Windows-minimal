@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <string>
 #include <system_error>
 #include <cstdlib>
@@ -41,6 +42,65 @@ bool parseJsonFile(const std::filesystem::path& path, Json::Value* root) {
   Json::CharReaderBuilder builder;
   std::string errors;
   return Json::parseFromStream(builder, stream, root, &errors);
+}
+
+// The nesting depth at which jsoncpp's reader gives up, ASKED OF THE LIBRARY
+// rather than assumed. CharReaderBuilder's documented default is 1000, but it is
+// a build-time constant: the jsoncpp these tests linked against on the dev machine
+// reports 256. Hard-coding either number would leave the test asserting nothing on
+// the build that used the other one, so we read it from the same defaults the
+// production code's CharReaderBuilder is constructed with.
+int jsoncppStackLimit() {
+  Json::Value settings;
+  Json::CharReaderBuilder::setDefaults(&settings);
+  return settings["stackLimit"].isIntegral() ? settings["stackLimit"].asInt() : 1000;
+}
+
+// A JSON value nested `depth` objects deep: {"a":{"a": ... 1 ... }}. Perfectly
+// VALID JSON at any depth -- that is the entire point of these tests.
+std::string deeplyNestedJsonValue(int depth) {
+  std::string value;
+  for (int i = 0; i < depth; ++i) {
+    value += "{\"a\":";
+  }
+  value += "1";
+  for (int i = 0; i < depth; ++i) {
+    value += "}";
+  }
+  return value;
+}
+
+// Does this jsoncpp actually THROW on these bytes (as opposed to returning
+// failure)? The fix's whole premise, checked against the library in front of us
+// instead of taken on faith: a build with no stack limit would parse the deep
+// document happily, and the tests below would then be asserting a hazard that does
+// not exist on it. They skip instead of failing spuriously.
+bool jsoncppThrowsOnParse(const std::string& document) {
+  std::istringstream stream(document);
+  Json::CharReaderBuilder builder;
+  Json::Value root;
+  std::string errors;
+  try {
+    Json::parseFromStream(builder, stream, &root, &errors);
+    return false;
+  } catch (const std::exception&) {
+    return true;
+  }
+}
+
+// Parsing with the limit lifted, to prove the document the production code refused
+// to judge is in fact VALID and complete -- i.e. that "Undetermined" really does
+// mean "we could not tell", not "it was garbage after all".
+bool parseWithRaisedStackLimit(const std::string& document, Json::Value* root) {
+  std::istringstream stream(document);
+  Json::CharReaderBuilder builder;
+  builder.settings_["stackLimit"] = jsoncppStackLimit() * 4 + 1000;
+  std::string errors;
+  try {
+    return Json::parseFromStream(builder, stream, root, &errors);
+  } catch (const std::exception&) {
+    return false;
+  }
 }
 
 } // namespace
@@ -449,42 +509,187 @@ TEST(TypeDuckPreferences, UnreadableFileIsReportedUnreadableNotAsACleanDefaultLo
 }
 
 TEST(TypeDuckPreferences, PathologicallyNestedJsonDegradesInsteadOfThrowing) {
-  // jsoncpp THROWS (Json::Exception) once a document nests past its reader stack
-  // limit -- about 1,000 levels, which a corrupt or hostile file reaches with a
-  // few kilobytes of brackets. loadPreferences runs on the launcher's libuv loop
-  // thread from handleBackendReply(), ahead of forwarding the reply to every
-  // client, so an exception thrown out of it would take the reply path (and the
-  // launcher) with it. It must degrade to defaults and report them as unread.
+  // jsoncpp THROWS (Json::RuntimeError, "Exceeded stackLimit in readValue()") once
+  // a document nests past its reader stack limit, which a file reaches with a few
+  // kilobytes of brackets. loadPreferences runs on the launcher's libuv loop thread
+  // from handleBackendReply(), ahead of forwarding the reply to every client, so an
+  // exception thrown out of it would take the reply path (and the launcher) with
+  // it. It must degrade instead of unwinding.
+  //
+  // THIS TEST USED TO ASSERT THE BUG. It required the deep document to SELF-HEAL
+  // (EXPECT_TRUE(saved.ok)) -- i.e. to be rewritten from defaults -- on the theory
+  // that an exception proves the file is garbage. It does not. A throw is the
+  // parser declining to judge, and the very same throw comes back for a perfectly
+  // VALID document (see DeeplyNestedUnknownKeyIsUndeterminedAndSurvivesTheSave).
+  // The parser cannot tell us which of the two we are holding, so neither can we,
+  // and a file we cannot judge must not be overwritten. The correct, stronger
+  // property is the opposite of what this test used to demand: the save REFUSES and
+  // the bytes on disk are left exactly as they were.
   const auto root = makeTempDir("typeduck-nested-json-test");
   const auto path = root / "preferences.json";
   constexpr int kNestingDepth = 2000;
-  writeFile(path, std::string(kNestingDepth, '[') + std::string(kNestingDepth, ']'));
+  const std::string original =
+      std::string(kNestingDepth, '[') + std::string(kNestingDepth, ']');
+  writeFile(path, original);
+
+  if (!jsoncppThrowsOnParse(original)) {
+    GTEST_SKIP() << "this jsoncpp does not throw at depth " << kNestingDepth
+                 << " (stackLimit=" << jsoncppStackLimit()
+                 << "); there is no undetermined-parse hazard to assert";
+  }
 
   Moqi::TypeDuck::ValidationResult loaded;
   ASSERT_NO_THROW(loaded = Moqi::TypeDuck::loadPreferences(path));
-  // The bytes came off the disk fine; it is the PARSE that blew up. That is
-  // Corrupt, not IoError -- there is nothing parseable in the file to lose, so
-  // the save below is still allowed to self-heal it.
-  EXPECT_EQ(loaded.source, Moqi::TypeDuck::PreferencesSource::Corrupt);
-  EXPECT_FALSE(Moqi::TypeDuck::preferencesBlockWrites(loaded));
+  // The bytes came off the disk fine; it is the PARSE that blew up. That is neither
+  // IoError (we DID read the bytes) nor Corrupt (the parser never actually rejected
+  // them -- it gave up). It is Undetermined, and Undetermined does not authorise a
+  // write.
+  EXPECT_EQ(loaded.source, Moqi::TypeDuck::PreferencesSource::Undetermined);
+  EXPECT_TRUE(Moqi::TypeDuck::preferencesBlockWrites(loaded));
+  EXPECT_FALSE(Moqi::TypeDuck::preferencesAreAuthoritative(loaded));
   EXPECT_FALSE(Moqi::TypeDuck::preferencesWereReadFromFile(loaded));
   EXPECT_FALSE(loaded.ok);
   EXPECT_FALSE(loaded.message.empty());
+  // Usable defaults still come back, so no caller is left holding a broken struct.
   EXPECT_EQ(loaded.preferences.pageSize,
             Moqi::TypeDuck::defaultPreferences().pageSize);
 
-  // The save path parses the same document as its merge base, so it must not
-  // throw either -- and it must still self-heal the file into a valid one.
+  // The save path parses the same document as its merge base, so it must not throw
+  // either -- and it must REFUSE, because merging onto the empty base it fell back
+  // to would rename a defaults document over bytes nobody has understood.
+  auto toggled = loaded.preferences;
+  toggled.asciiMode = true;  // exactly what one Shift press tries to persist
+  Moqi::TypeDuck::SaveResult saved;
+  ASSERT_NO_THROW(saved = Moqi::TypeDuck::savePreferences(path, toggled));
+  EXPECT_FALSE(saved.ok);
+  EXPECT_FALSE(saved.message.empty());
+  EXPECT_NE(saved.message.find("設定"), std::string::npos);
+  EXPECT_NE(saved.message.find("settings"), std::string::npos);
+
+  // The whole point: THE ORIGINAL BYTES ARE STILL THERE, byte for byte...
+  EXPECT_EQ(readFile(path), original);
+  // ...and refusing meant touching nothing at all, so no temp file was left behind.
+  EXPECT_FALSE(std::filesystem::exists(root / "preferences.json.tmp"));
+
+  // The verdict is stable: reloading says Undetermined again, not "now it is fine".
+  EXPECT_EQ(Moqi::TypeDuck::loadPreferences(path).source,
+            Moqi::TypeDuck::PreferencesSource::Undetermined);
+}
+
+TEST(TypeDuckPreferences, DeeplyNestedUnknownKeyIsUndeterminedAndSurvivesTheSave) {
+  // THE USER-VISIBLE BUG, and the reason a thrown parse may never be filed as
+  // Corrupt. This file is not hostile and it is not damaged: it is a completely
+  // VALID JSON object holding every modelled preference the user has set, plus one
+  // unknown key -- written by a newer build, a hand edit, or a settings app this
+  // binary predates -- whose value happens to nest past jsoncpp's reader stack
+  // limit. jsoncpp throws on it exactly as it throws on a wall of brackets.
+  //
+  // Before the fix: the throw was filed as Corrupt, Corrupt is writable by design,
+  // and so the next Shift press merged asciiMode onto an EMPTY object and renamed
+  // that over the file -- resetting pageSize to 6, resetting everything else to
+  // defaults, and DELETING the deep key outright. The file was never garbage. We
+  // just could not read it, and said "garbage" instead of "I do not know".
+  const auto root = makeTempDir("typeduck-deep-unknown-key-test");
+  const auto path = root / "preferences.json";
+
+  // Find the real limit rather than guessing it: ask the library (it is a build-time
+  // constant -- nominally 1000, but 256 on the jsoncpp these tests linked against),
+  // then nest a little past it.
+  const int stackLimit = jsoncppStackLimit();
+  ASSERT_GT(stackLimit, 0);
+  if (stackLimit > 20000) {
+    GTEST_SKIP() << "stackLimit " << stackLimit
+                 << " is too deep to provoke without risking the real C stack";
+  }
+  const int depth = stackLimit + 8;
+
+  // A valid settings document: the normal modelled keys, all set to NON-default
+  // values so that a rewrite-from-defaults would be unmistakable, plus the deep
+  // unknown key.
+  const std::string original =
+      "{\n"
+      "  \"displayLanguages\": [\"eng\", \"hin\"],\n"
+      "  \"mainLanguage\": \"hin\",\n"
+      "  \"pageSize\": 9,\n"
+      "  \"isHeiTypeface\": true,\n"
+      "  \"showRomanization\": \"never\",\n"
+      "  \"enableCompletion\": false,\n"
+      "  \"enableCorrection\": true,\n"
+      "  \"enableSentence\": false,\n"
+      "  \"enableLearning\": false,\n"
+      "  \"showReverseCode\": false,\n"
+      "  \"isCangjie5\": false,\n"
+      "  \"asciiMode\": false,\n"
+      "  \"deeplyNestedFutureSetting\": " +
+      deeplyNestedJsonValue(depth) +
+      "\n"
+      "}";
+  writeFile(path, original);
+
+  // Establish the premise against the library in front of us, not from memory:
+  // (a) the production parser THROWS on this document...
+  if (!jsoncppThrowsOnParse(original)) {
+    GTEST_SKIP() << "this jsoncpp parses depth " << depth
+                 << " without throwing (stackLimit=" << stackLimit
+                 << "); the hazard does not exist on this build";
+  }
+  // (b) ...and yet the document is perfectly VALID and complete -- lift the limit
+  // and every key is right there. "The parser threw" is emphatically NOT "the file
+  // is garbage", and that is the entire distinction between Undetermined and
+  // Corrupt.
+  Json::Value proof;
+  ASSERT_TRUE(parseWithRaisedStackLimit(original, &proof));
+  ASSERT_TRUE(proof.isObject());
+  EXPECT_EQ(proof["pageSize"].asInt(), 9);
+  EXPECT_TRUE(proof.isMember("deeplyNestedFutureSetting"));
+
+  // The load must say "I do not know", not "it is garbage".
+  Moqi::TypeDuck::ValidationResult loaded;
+  ASSERT_NO_THROW(loaded = Moqi::TypeDuck::loadPreferences(path));
+  EXPECT_EQ(loaded.source, Moqi::TypeDuck::PreferencesSource::Undetermined);
+  EXPECT_NE(loaded.source, Moqi::TypeDuck::PreferencesSource::Corrupt);
+  EXPECT_TRUE(Moqi::TypeDuck::preferencesBlockWrites(loaded));
+  EXPECT_FALSE(Moqi::TypeDuck::preferencesAreAuthoritative(loaded));
+  EXPECT_FALSE(Moqi::TypeDuck::preferencesWereReadFromFile(loaded));
+  EXPECT_FALSE(loaded.ok);
+  EXPECT_FALSE(loaded.message.empty());
+
+  // One Shift press. This is the keystroke that used to destroy the file.
   auto toggled = loaded.preferences;
   toggled.asciiMode = true;
   Moqi::TypeDuck::SaveResult saved;
   ASSERT_NO_THROW(saved = Moqi::TypeDuck::savePreferences(path, toggled));
-  EXPECT_TRUE(saved.ok);
+  EXPECT_FALSE(saved.ok);
+  EXPECT_FALSE(saved.message.empty());
+  // Bilingual, and truthful about WHICH failure this is: the file is intact and
+  // unreadable-to-us, not locked or on a broken disk. It must therefore not be the
+  // "could not be read" message, which would send the user hunting for an antivirus
+  // lock that does not exist.
+  EXPECT_NE(saved.message.find("設定檔"), std::string::npos);
+  EXPECT_NE(saved.message.find("settings file"), std::string::npos);
+  EXPECT_NE(saved.message.find("未能解析"), std::string::npos);
+  EXPECT_EQ(saved.message.find("未能讀取"), std::string::npos);
 
-  const auto reloaded = Moqi::TypeDuck::loadPreferences(path);
-  EXPECT_EQ(reloaded.source, Moqi::TypeDuck::PreferencesSource::File);
-  EXPECT_TRUE(reloaded.ok);
-  EXPECT_TRUE(reloaded.preferences.asciiMode);
+  // THE ASSERTION THE WHOLE FIX EXISTS FOR: the file on disk is byte-for-byte what
+  // the user had. Not merged, not defaulted, not truncated -- untouched.
+  EXPECT_EQ(readFile(path), original);
+  EXPECT_FALSE(std::filesystem::exists(root / "preferences.json.tmp"));
+  EXPECT_TRUE(std::filesystem::exists(path));
+
+  // And spelled out in terms of what the user would actually notice, in case a
+  // future refactor makes the byte comparison pass for the wrong reason: their
+  // settings and their unknown key are all still in the file.
+  Json::Value after;
+  ASSERT_TRUE(parseWithRaisedStackLimit(readFile(path), &after));
+  ASSERT_TRUE(after.isObject());
+  EXPECT_EQ(after["pageSize"].asInt(), 9);                 // not reset to 6
+  EXPECT_EQ(after["showRomanization"].asString(), "never");  // not reset to "always"
+  EXPECT_FALSE(after["isCangjie5"].asBool());
+  EXPECT_TRUE(after.isMember("deeplyNestedFutureSetting"));  // not deleted
+  // The toggle itself was NOT persisted, and that is the deal we accepted: losing
+  // the toggled input mode across a restart is survivable, destroying the settings
+  // file is not.
+  EXPECT_FALSE(after["asciiMode"].asBool());
 }
 
 TEST(TypeDuckPreferences, AbsentFileStaysTheQuietFirstRunDefaultPath) {
@@ -529,9 +734,15 @@ TEST(TypeDuckPreferences, AbsentFileStaysTheQuietFirstRunDefaultPath) {
 TEST(TypeDuckPreferences, SourcePredicatesSplitReadFailureFromCorruption) {
   // The contract every writer codes against. Authoritative == "these values are
   // really what is on disk" (File, and Absent because no file means the defaults
-  // ARE the state). BlockWrites == IoError and NOTHING else: a file we could not
-  // read must never be written over, while a corrupt file has nothing parseable
-  // in it to lose and is deliberately left writable so the save can self-heal it.
+  // ARE the state). BlockWrites == the verdicts under which THE CONTENTS ARE
+  // UNKNOWN, and there are TWO of them:
+  //   IoError      -- we never saw the bytes.
+  //   Undetermined -- we saw them and the parser THREW instead of judging them, so
+  //                   the document may be entirely valid and full of settings.
+  // Corrupt is the one failure we are CERTAIN about -- the parser looked at the
+  // bytes and rejected them -- so it stays writable and the save self-heals it.
+  // Blocking Corrupt would wedge the Shift toggle forever on a single bad byte;
+  // allowing Undetermined destroys a valid file. The split is the whole design.
   const auto sourceOf = [](Moqi::TypeDuck::PreferencesSource source) {
     Moqi::TypeDuck::ValidationResult result;
     result.source = source;
@@ -543,13 +754,21 @@ TEST(TypeDuckPreferences, SourcePredicatesSplitReadFailureFromCorruption) {
   EXPECT_TRUE(Moqi::TypeDuck::preferencesAreAuthoritative(sourceOf(Source::Absent)));
   EXPECT_FALSE(Moqi::TypeDuck::preferencesAreAuthoritative(sourceOf(Source::IoError)));
   EXPECT_FALSE(Moqi::TypeDuck::preferencesAreAuthoritative(sourceOf(Source::Corrupt)));
+  EXPECT_FALSE(
+      Moqi::TypeDuck::preferencesAreAuthoritative(sourceOf(Source::Undetermined)));
   EXPECT_FALSE(Moqi::TypeDuck::preferencesAreAuthoritative(sourceOf(Source::NotLoaded)));
 
   EXPECT_TRUE(Moqi::TypeDuck::preferencesBlockWrites(sourceOf(Source::IoError)));
+  EXPECT_TRUE(Moqi::TypeDuck::preferencesBlockWrites(sourceOf(Source::Undetermined)));
   EXPECT_FALSE(Moqi::TypeDuck::preferencesBlockWrites(sourceOf(Source::Corrupt)));
   EXPECT_FALSE(Moqi::TypeDuck::preferencesBlockWrites(sourceOf(Source::File)));
   EXPECT_FALSE(Moqi::TypeDuck::preferencesBlockWrites(sourceOf(Source::Absent)));
   EXPECT_FALSE(Moqi::TypeDuck::preferencesBlockWrites(sourceOf(Source::NotLoaded)));
+
+  // Undetermined is NOT read-from-file: the values handed back with it are invented
+  // defaults, and nothing may mistake them for the stored state.
+  EXPECT_FALSE(
+      Moqi::TypeDuck::preferencesWereReadFromFile(sourceOf(Source::Undetermined)));
 
   // The default-constructed result never claims to know anything about the disk.
   EXPECT_EQ(Moqi::TypeDuck::ValidationResult{}.source, Source::NotLoaded);

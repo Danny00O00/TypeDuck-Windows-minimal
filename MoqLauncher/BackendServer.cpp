@@ -244,6 +244,21 @@ void BackendServer::persistTypeDuckAsciiMode(bool asciiMode) {
           NIIF_WARNING);
     };
 
+    // The latch means "we have already told the user about the CURRENT failure",
+    // not "we told them once, ever", so a streak that resolves must re-arm it or
+    // a later, unrelated streak warns nobody. Only a SUCCESSFUL SAVE re-arms it:
+    // that is the single fact that proves the file can be WRITTEN, which is the
+    // thing we warned about.
+    //
+    // Finding the disk already in agreement deliberately does NOT re-arm. It
+    // proves only that the file can be READ. On a read-only file the modes
+    // alternate against a fixed stored value, so every second Shift press finds
+    // the disk agreeing -- re-arming there would fire a tray balloon on every
+    // other press of the language-toggle key for as long as the file stays
+    // unwritable. A resolved streak still re-arms on its own: whatever made the
+    // file writable again makes the next mismatching toggle save successfully.
+    const auto rearmWarning = [this]() { asciiPersistFailureNotified_ = false; };
+
     // Bounded, immediate retries; see kAsciiModePersistAttempts. Persistence is
     // best-effort and must NEVER block or fail the reply-forwarding path: this
     // function returns void, cannot throw, and the caller forwards the backend
@@ -267,17 +282,28 @@ void BackendServer::persistTypeDuckAsciiMode(bool asciiMode) {
       // silently revert on the next restart.
       if (TypeDuck::preferencesAreAuthoritative(loaded) &&
           loaded.preferences.asciiMode == asciiMode) {
+        // Deliberately does not re-arm the warning latch: see rearmWarning.
         return;
       }
 
-      // The file is there and we could NOT read it. Retry the READ -- never the
-      // write. Writing here would merge the new mode onto invented defaults and
-      // rename that over a file whose real contents we never saw, destroying
-      // every other setting in it. savePreferences() refuses this anyway; the
-      // point of stopping here is to not even ask, and to spend the remaining
-      // attempts on the only thing that can still succeed: reading. The retries
-      // are immediate (no sleep, no backoff) because this is the libuv loop
-      // thread that forwards backend replies to every client.
+      // We read bytes we could not turn into a verdict, or could not read at
+      // all: IoError (the file is there and would not open / would not read to
+      // the end) or Undetermined (the parser THREW - a jsoncpp stack blow-up on
+      // a deeply nested but possibly perfectly VALID document). Both mean the
+      // same thing here - THE CONTENTS ARE UNKNOWN - so both must take this
+      // path, and the test is preferencesBlockWrites(), never a comparison
+      // against one specific enumerator: a new "we do not know" verdict must
+      // join this branch automatically instead of silently falling through into
+      // the write below.
+      //
+      // Retry the READ -- never the write. Writing here would merge the new mode
+      // onto invented defaults and rename that over a file whose real contents
+      // we never saw, destroying every other setting in it. savePreferences()
+      // refuses this anyway; the point of stopping here is to not even ask, and
+      // to spend the remaining attempts on the only thing that can still
+      // succeed: reading. The retries are immediate (no sleep, no backoff)
+      // because this is the libuv loop thread that forwards backend replies to
+      // every client.
       if (TypeDuck::preferencesBlockWrites(loaded)) {
         // Logs record only the backend name and the attempt counter - never any
         // typed content.
@@ -294,8 +320,9 @@ void BackendServer::persistTypeDuckAsciiMode(bool asciiMode) {
 
       const auto saved = TypeDuck::savePreferences(path, loaded.preferences);
       if (saved.ok) {
-        // Re-arm the warning so a later failure streak can notify again.
-        asciiPersistFailureNotified_ = false;
+        // The mode is on disk: re-arm the warning so a later failure streak can
+        // notify again.
+        rearmWarning();
         return;
       }
       logger()->warn(

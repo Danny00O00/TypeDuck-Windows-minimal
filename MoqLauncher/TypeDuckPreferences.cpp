@@ -28,12 +28,30 @@ constexpr const char* kInvalidFileMessage =
     "設定檔無效，已使用預設值 / Settings file is invalid; defaults were loaded";
 constexpr const char* kUnreadableFileMessage =
     "設定檔未能讀取，已使用預設值 / Settings file could not be read; defaults were loaded";
+// Undetermined is NOT "invalid". The bytes were read and the parser gave up on
+// them -- which jsoncpp also does to a perfectly VALID document that merely nests
+// too deep -- so the file may hold every one of the user's settings. Say that,
+// rather than kInvalidFileMessage's "the file is invalid", which would be a lie we
+// have no evidence for.
+constexpr const char* kUndeterminedFileMessage =
+    "設定檔內容未能解析，暫時使用預設值；原有設定檔並未改動 / Settings file could not be "
+    "interpreted; defaults are being used for now and the file itself is left unchanged";
 // Refusing to save is the SUCCESSFUL outcome of the rule "never write over a file
-// we could not read": the user keeps every setting in the unread file and loses
-// only this one change, instead of keeping this one change and losing the file.
+// whose contents we do not know": the user keeps every setting in the file and
+// loses only this one change, instead of keeping this one change and losing the
+// file.
 constexpr const char* kUnreadableSaveMessage =
     "設定檔未能讀取，為免覆蓋原有設定，今次變更未有儲存 / Settings file could not be "
     "read; this change was not saved so that the existing settings are not overwritten";
+// Deliberately DISTINCT from kUnreadableSaveMessage. The user's next move differs:
+// there is nothing wrong with their disk or their permissions, the file is intact
+// and readable -- it is this program that cannot make sense of it. Telling them
+// "could not be read" would send them hunting for an antivirus lock that is not
+// there.
+constexpr const char* kUndeterminedSaveMessage =
+    "設定檔內容未能解析，為免覆蓋檔案內原有設定，今次變更未有儲存；設定檔本身完好無損 / "
+    "The settings file could not be interpreted; this change was not saved so that the "
+    "settings it still holds are not overwritten. The file itself is intact and unchanged";
 
 const std::vector<std::string>& languageOrder() {
   static const std::vector<std::string> languages{"eng", "hin", "ind", "nep", "urd"};
@@ -56,16 +74,50 @@ struct PreferencesDocument {
   Json::Value root{Json::objectValue};
 };
 
+// THE one rule that decides whether the file may be overwritten, stated ONCE.
+// Both the public predicate (which every external writer gates on) and
+// savePreferences's own refusal call this, so the check a caller performs and the
+// check the save performs can never drift apart -- a save that tested a different
+// condition than the predicate is precisely how a "blocked" file would still get
+// rewritten. Adding an enumerator therefore only ever has to be considered here.
+//
+// The invariant: WRITE ONLY WHEN WE ARE CERTAIN WHAT IS IN THE FILE.
+//   File / Absent   -- we know: the parsed document, or no document at all.
+//   Corrupt         -- we know: the parser positively REJECTED these bytes, so
+//                      there is nothing parseable to lose. Writable; self-heals.
+//   IoError         -- we never saw the bytes.            UNKNOWN -> no write.
+//   Undetermined    -- we saw the bytes and the parser THREW rather than judging
+//                      them. The document may be entirely VALID. UNKNOWN -> no
+//                      write.
+//   NotLoaded       -- not a statement about the disk at all; never came from a
+//                      load, so it blocks nothing.
+bool sourceBlocksWrites(PreferencesSource source) {
+  return source == PreferencesSource::IoError ||
+         source == PreferencesSource::Undetermined;
+}
+
 // THE single place that decides what is on disk. loadPreferences and
 // savePreferences both go through it, so the read that decides "may I write?"
 // and the read that builds the merge base can never disagree -- if they could,
 // save would happily rewrite from an empty base a file that load had just
 // declared unreadable, which is exactly the bug this function exists to kill.
 //
-// Never throws: jsoncpp raises Json::Exception (e.g. on a document nested past
-// its reader stack limit) and this runs on the launcher's libuv loop thread.
-// An exception AFTER the bytes are in hand is a parse failure -> Corrupt; one
-// before is a read failure -> IoError, the verdict that forbids writing.
+// Never throws: jsoncpp raises Json::Exception (e.g. on a document nested past its
+// reader stack limit) and this runs on the launcher's libuv loop thread.
+//
+// The three failure verdicts are NOT interchangeable, and getting this wrong is
+// the bug this file keeps re-learning:
+//   - a throw BEFORE the bytes are in hand   -> IoError      (never saw them)
+//   - the parser RETURNS FAILURE, or the root is not an object
+//                                            -> Corrupt      (certainly garbage)
+//   - the parser THROWS on bytes we did read -> Undetermined (verdict unknown)
+// A THROW IS NOT A FINDING OF GARBAGE. jsoncpp throws "Exceeded stackLimit in
+// readValue()" for a document that is perfectly VALID JSON and merely nested past
+// CharReaderBuilder's limit, so filing every exception as Corrupt -- which is
+// writable by design -- means a valid settings file carrying one deeply nested
+// unknown key gets declared garbage and rewritten from defaults on the next Shift
+// press, deleting that key. Only a verdict we are CERTAIN of may authorise a
+// write, and "the parser gave up" is not certainty.
 PreferencesDocument readPreferencesDocument(const std::filesystem::path& path) {
   bool bytesWereRead = false;
   try {
@@ -124,22 +176,48 @@ PreferencesDocument readPreferencesDocument(const std::filesystem::path& path) {
     // file ourselves is only to learn WHETHER the bytes arrived, which a parse
     // straight off the ifstream cannot tell us (it reports "not JSON" for a read
     // error and a garbage file alike, and those two need opposite verdicts).
-    std::istringstream contentStream(contents);
-    Json::CharReaderBuilder builder;
-    Json::Value root;
-    std::string errors;
-    if (!Json::parseFromStream(builder, contentStream, &root, &errors) ||
-        !root.isObject()) {
-      // Read fine, unparseable (or a JSON array/scalar, which cannot be merged
-      // onto). There is nothing in there to lose, so a rewrite may self-heal it.
-      return {PreferencesSource::Corrupt, Json::Value(Json::objectValue)};
+    //
+    // The parse gets its OWN try/catch so that RETURNING FAILURE and THROWING stay
+    // two distinct answers. Returning false is the parser telling us it looked at
+    // the bytes and they are not JSON: a finding, and a certain one. Throwing is
+    // the parser telling us nothing at all -- it bailed out on its stack limit,
+    // which a VALID but deeply nested document trips just as readily as a hostile
+    // one. Collapsing the two into "Corrupt" is what let a valid file be rewritten.
+    try {
+      std::istringstream contentStream(contents);
+      Json::CharReaderBuilder builder;
+      Json::Value root;
+      std::string errors;
+      if (!Json::parseFromStream(builder, contentStream, &root, &errors)) {
+        // Read fine, and the parser positively rejected it. Nothing parseable is
+        // in there to lose, so a rewrite may self-heal it.
+        return {PreferencesSource::Corrupt, Json::Value(Json::objectValue)};
+      }
+      if (!root.isObject()) {
+        // Valid JSON, but an array or a scalar: there is no object to merge our
+        // keys onto, and no settings can be hiding in it. Also certain, also
+        // writable.
+        return {PreferencesSource::Corrupt, Json::Value(Json::objectValue)};
+      }
+      return {PreferencesSource::File, root};
+    } catch (...) {
+      // Json::RuntimeError ("Exceeded stackLimit in readValue()"), std::bad_alloc,
+      // anything else the reader can raise. We hold the user's bytes and we do not
+      // know what they mean. THIS IS NOT A LICENCE TO OVERWRITE THEM: the document
+      // is very possibly valid, complete, and full of settings.
+      return {PreferencesSource::Undetermined, Json::Value(Json::objectValue)};
     }
-    return {PreferencesSource::File, root};
   } catch (const std::exception&) {
-    return {bytesWereRead ? PreferencesSource::Corrupt : PreferencesSource::IoError,
+    // Anything that escaped the stat/open/read above. If the bytes never arrived we
+    // never saw the file (IoError); if they did, we hold them but still cannot say
+    // what they are (Undetermined). Both are "contents unknown", and NEITHER is
+    // writable -- an exception is never evidence that a file is garbage.
+    return {bytesWereRead ? PreferencesSource::Undetermined
+                          : PreferencesSource::IoError,
             Json::Value(Json::objectValue)};
   } catch (...) {
-    return {bytesWereRead ? PreferencesSource::Corrupt : PreferencesSource::IoError,
+    return {bytesWereRead ? PreferencesSource::Undetermined
+                          : PreferencesSource::IoError,
             Json::Value(Json::objectValue)};
   }
 }
@@ -417,9 +495,12 @@ bool preferencesAreAuthoritative(const ValidationResult& result) {
 }
 
 bool preferencesBlockWrites(const ValidationResult& result) {
-  // IoError ONLY. Corrupt is deliberately writable (self-heal), and NotLoaded is
-  // not a statement about the disk at all -- it never came from a load.
-  return result.source == PreferencesSource::IoError;
+  // IoError and Undetermined: the two verdicts under which we do not know what is
+  // in the file. Corrupt is deliberately writable (the parser rejected the bytes,
+  // so the self-heal loses nothing), and NotLoaded is not a statement about the
+  // disk at all -- it never came from a load. savePreferences refuses on this very
+  // same helper, so the two can never disagree.
+  return sourceBlocksWrites(result.source);
 }
 
 // Never throws; see the contract on the declaration. Failures do not just have
@@ -446,6 +527,13 @@ ValidationResult loadPreferences(const std::filesystem::path& path) {
     case PreferencesSource::Corrupt:
       return {false, defaultPreferences(), kInvalidFileMessage,
               PreferencesSource::Corrupt};
+    case PreferencesSource::Undetermined:
+      // The parser threw. We are handing back defaults, but we are NOT claiming
+      // the file is invalid -- we could not tell, and it may well be a valid
+      // document we merely cannot walk. Writers gate on preferencesBlockWrites,
+      // which is true here, so those defaults can never be flushed back over it.
+      return {false, defaultPreferences(), kUndeterminedFileMessage,
+              PreferencesSource::Undetermined};
     case PreferencesSource::IoError:
     case PreferencesSource::NotLoaded:
       break;
@@ -478,18 +566,32 @@ SaveResult savePreferences(const std::filesystem::path& path,
     // Read the merge base FIRST -- before creating a directory, before opening a
     // temp file, before touching anything at all.
     //
-    // If the file is there but unreadable, this is where we STOP. Falling through
-    // would merge the new value onto an EMPTY base and rename that over the file,
-    // rewriting the user's settings from defaults and destroying every key the
-    // unread file was holding. The Shift toggle calls this on every press, so
-    // that would land on a single keystroke. Losing this one change is the
-    // acceptable outcome; losing the file is not.
+    // If we cannot say what is in the file, this is where we STOP, having touched
+    // NOTHING. Falling through would merge the new value onto an EMPTY base and
+    // rename that over the file, rewriting the user's settings from defaults and
+    // destroying every key the file was holding. The Shift toggle calls this on
+    // every press, so that would land on a single keystroke. Losing this one change
+    // is the acceptable outcome; losing the file is not.
+    //
+    // Gated on the SAME sourceBlocksWrites() that backs the public predicate, so a
+    // caller that checked preferencesBlockWrites and this save can never reach
+    // opposite conclusions. It covers BOTH unknown-contents verdicts:
+    //   IoError      -- we never got the bytes.
+    //   Undetermined -- we got them and the parser threw instead of judging them,
+    //                   which a VALID document nested past jsoncpp's stack limit
+    //                   does. Previously such a file was filed as Corrupt and this
+    //                   very line waved it through to be rewritten from defaults.
+    // The messages differ on purpose: an unreadable file is the user's disk or ACL
+    // to fix, an undetermined one is intact and ours to fail on.
     const auto base = readPreferencesDocument(path);
-    if (base.source == PreferencesSource::IoError) {
-      return {false, kUnreadableSaveMessage};
+    if (sourceBlocksWrites(base.source)) {
+      return {false, base.source == PreferencesSource::Undetermined
+                         ? kUndeterminedSaveMessage
+                         : kUnreadableSaveMessage};
     }
-    // Absent (first run) and Corrupt (nothing parseable in there to lose) both
-    // carry an empty object and write normally -- the Corrupt case self-heals.
+    // Absent (first run) and Corrupt (the parser rejected the bytes, so there is
+    // nothing parseable in there to lose) both carry an empty object and write
+    // normally -- the Corrupt case self-heals.
 
     std::error_code ec;
     std::filesystem::create_directories(path.parent_path(), ec);
