@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <system_error>
 #include <cstdlib>
 
 namespace {
@@ -364,4 +365,143 @@ TEST(TypeDuckPreferences, CorruptJsonStillSavesFromDefaults) {
   const auto afterArray = Moqi::TypeDuck::loadPreferences(path);
   ASSERT_TRUE(afterArray.ok) << afterArray.message;
   EXPECT_TRUE(afterArray.preferences.asciiMode);
+}
+
+TEST(TypeDuckPreferences, UnreadableFileIsReportedUnreadableNotAsACleanDefaultLoad) {
+  // A load that could not read the file hands back defaults, and defaults look
+  // exactly like stored values. The ascii-mode persistence path compares the
+  // loaded value against the value it is about to write and skips the save when
+  // they match, so a load that cannot read the file MUST say so: otherwise disk
+  // holds true, the file goes unreadable, the user toggles to false, the
+  // invented default false "matches", the save/retry/warning are all skipped,
+  // and the next restart restores true -- the opposite of what the user set.
+  const auto root = makeTempDir("typeduck-unreadable-load-test");
+
+  // A file whose read permission has been revoked. POSIX honours that; MSVC's
+  // std::filesystem only models the read-only attribute and a root test runner
+  // ignores the mode entirely, so this half only asserts where it truly applies.
+  const auto denied = root / "denied.json";
+  writeFile(denied, R"({"pageSize": 8, "asciiMode": true})");
+  std::error_code ec;
+  std::filesystem::permissions(denied, std::filesystem::perms::none,
+                               std::filesystem::perm_options::replace, ec);
+  bool deniedIsStillOpenable = true;
+  {
+    std::ifstream probe(denied, std::ios::binary);
+    deniedIsStillOpenable = probe.is_open();
+  }
+  if (!deniedIsStillOpenable) {
+    const auto loaded = Moqi::TypeDuck::loadPreferences(denied);
+    EXPECT_EQ(loaded.source, Moqi::TypeDuck::PreferencesSource::Unreadable);
+    EXPECT_FALSE(Moqi::TypeDuck::preferencesWereReadFromFile(loaded));
+    EXPECT_FALSE(loaded.ok);
+    EXPECT_FALSE(loaded.message.empty());
+    // The stored asciiMode was true; the defaults we fell back to say false, and
+    // nothing may mistake that false for the value on disk.
+    EXPECT_FALSE(loaded.preferences.asciiMode);
+    EXPECT_EQ(loaded.preferences.pageSize,
+              Moqi::TypeDuck::defaultPreferences().pageSize);
+  }
+  std::filesystem::permissions(denied, std::filesystem::perms::owner_all,
+                               std::filesystem::perm_options::replace, ec);
+
+  // A path that exists but cannot be read as a preferences document. Portable on
+  // purpose: Windows refuses to open a directory as a file, POSIX opens it and
+  // then fails the read. Either way the verdict must be "unreadable", never
+  // "absent" and never a clean load.
+  const auto directoryPath = root / "directory.json";
+  std::filesystem::create_directories(directoryPath);
+  const auto loadedDirectory = Moqi::TypeDuck::loadPreferences(directoryPath);
+  EXPECT_EQ(loadedDirectory.source, Moqi::TypeDuck::PreferencesSource::Unreadable);
+  EXPECT_FALSE(Moqi::TypeDuck::preferencesWereReadFromFile(loadedDirectory));
+  EXPECT_FALSE(loadedDirectory.ok);
+  EXPECT_FALSE(loadedDirectory.message.empty());
+
+  // And a file that opens but is not JSON at all: unparseable is unreadable too.
+  const auto garbage = root / "garbage.json";
+  writeFile(garbage, std::string("\x01\x02 not json {{{", 15));
+  const auto loadedGarbage = Moqi::TypeDuck::loadPreferences(garbage);
+  EXPECT_EQ(loadedGarbage.source, Moqi::TypeDuck::PreferencesSource::Unreadable);
+  EXPECT_FALSE(Moqi::TypeDuck::preferencesWereReadFromFile(loadedGarbage));
+  EXPECT_FALSE(loadedGarbage.ok);
+
+  // A readable, valid file is the control: this one really was read from disk.
+  const auto good = root / "good.json";
+  auto prefs = Moqi::TypeDuck::defaultPreferences();
+  prefs.asciiMode = true;
+  ASSERT_TRUE(Moqi::TypeDuck::savePreferences(good, prefs).ok);
+  const auto loadedGood = Moqi::TypeDuck::loadPreferences(good);
+  EXPECT_EQ(loadedGood.source, Moqi::TypeDuck::PreferencesSource::File);
+  EXPECT_TRUE(Moqi::TypeDuck::preferencesWereReadFromFile(loadedGood));
+  EXPECT_TRUE(loadedGood.ok);
+  EXPECT_TRUE(loadedGood.preferences.asciiMode);
+}
+
+TEST(TypeDuckPreferences, PathologicallyNestedJsonDegradesInsteadOfThrowing) {
+  // jsoncpp THROWS (Json::Exception) once a document nests past its reader stack
+  // limit -- about 1,000 levels, which a corrupt or hostile file reaches with a
+  // few kilobytes of brackets. loadPreferences runs on the launcher's libuv loop
+  // thread from handleBackendReply(), ahead of forwarding the reply to every
+  // client, so an exception thrown out of it would take the reply path (and the
+  // launcher) with it. It must degrade to defaults and report them as unread.
+  const auto root = makeTempDir("typeduck-nested-json-test");
+  const auto path = root / "preferences.json";
+  constexpr int kNestingDepth = 2000;
+  writeFile(path, std::string(kNestingDepth, '[') + std::string(kNestingDepth, ']'));
+
+  Moqi::TypeDuck::ValidationResult loaded;
+  ASSERT_NO_THROW(loaded = Moqi::TypeDuck::loadPreferences(path));
+  EXPECT_EQ(loaded.source, Moqi::TypeDuck::PreferencesSource::Unreadable);
+  EXPECT_FALSE(Moqi::TypeDuck::preferencesWereReadFromFile(loaded));
+  EXPECT_FALSE(loaded.ok);
+  EXPECT_FALSE(loaded.message.empty());
+  EXPECT_EQ(loaded.preferences.pageSize,
+            Moqi::TypeDuck::defaultPreferences().pageSize);
+
+  // The save path parses the same document as its merge base, so it must not
+  // throw either -- and it must still self-heal the file into a valid one.
+  auto toggled = loaded.preferences;
+  toggled.asciiMode = true;
+  Moqi::TypeDuck::SaveResult saved;
+  ASSERT_NO_THROW(saved = Moqi::TypeDuck::savePreferences(path, toggled));
+  EXPECT_TRUE(saved.ok);
+
+  const auto reloaded = Moqi::TypeDuck::loadPreferences(path);
+  EXPECT_EQ(reloaded.source, Moqi::TypeDuck::PreferencesSource::File);
+  EXPECT_TRUE(reloaded.ok);
+  EXPECT_TRUE(reloaded.preferences.asciiMode);
+}
+
+TEST(TypeDuckPreferences, AbsentFileStaysTheQuietFirstRunDefaultPath) {
+  // The first-run path must keep working exactly as before: no file yet is not
+  // an error, must not warn the user, must not be confused with an unreadable
+  // file, and must not create anything on disk just by being read.
+  const auto root = makeTempDir("typeduck-absent-load-test");
+  const auto path = root / "preferences.json";
+  ASSERT_FALSE(std::filesystem::exists(path));
+
+  const auto loaded = Moqi::TypeDuck::loadPreferences(path);
+  EXPECT_TRUE(loaded.ok);
+  EXPECT_TRUE(loaded.message.empty());
+  EXPECT_EQ(loaded.source, Moqi::TypeDuck::PreferencesSource::Absent);
+  EXPECT_NE(loaded.source, Moqi::TypeDuck::PreferencesSource::Unreadable);
+  // Absent means "defaults ARE the state on disk", but they still were not read
+  // out of a file, and callers that need proof of the stored value must not get
+  // it here.
+  EXPECT_FALSE(Moqi::TypeDuck::preferencesWereReadFromFile(loaded));
+
+  const auto defaults = Moqi::TypeDuck::defaultPreferences();
+  EXPECT_EQ(loaded.preferences.displayLanguages, defaults.displayLanguages);
+  EXPECT_EQ(loaded.preferences.pageSize, defaults.pageSize);
+  EXPECT_EQ(loaded.preferences.showRomanization, defaults.showRomanization);
+  EXPECT_FALSE(loaded.preferences.asciiMode);
+  EXPECT_FALSE(std::filesystem::exists(path));
+
+  // A file under a directory that does not exist yet is just as absent.
+  const auto missing = Moqi::TypeDuck::loadPreferences(
+      root / "no-such-directory" / "preferences.json");
+  EXPECT_TRUE(missing.ok);
+  EXPECT_TRUE(missing.message.empty());
+  EXPECT_EQ(missing.source, Moqi::TypeDuck::PreferencesSource::Absent);
+  EXPECT_FALSE(Moqi::TypeDuck::preferencesWereReadFromFile(missing));
 }

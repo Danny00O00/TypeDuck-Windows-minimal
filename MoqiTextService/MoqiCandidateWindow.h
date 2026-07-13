@@ -96,6 +96,13 @@ public:
     // width are resolved from the monitor this rect lands on, i.e. the monitor the popup
     // is actually placed on, which is not necessarily the owner window's monitor.
     void setAnchorRect(const RECT& rect);
+    // Re-runs the layout when the anchor pushed by setAnchorRect() resolves to a different
+    // monitor than the one the layout currently in effect was computed against. A pure layout
+    // change (the host window dragged to another display) changes no candidate content, so
+    // nothing else re-runs the sizing and the popup would keep the previous monitor's width.
+    // A no-op when the monitor is unchanged, so single-monitor sizing is never re-run.
+    // Returns true when the layout was re-run.
+    bool relayoutForAnchorMonitor();
     void recalculateSize() override;
     void refresh();
 
@@ -133,6 +140,9 @@ private:
     // Monitor the popup is placed on, derived from the caret anchor; null until an anchor
     // has been pushed, in which case callers fall back to the owner window's monitor.
     HMONITOR anchorMonitor() const;
+    // Monitor the layout must be sized against: the caret anchor's monitor once one is known,
+    // otherwise the owner window's. Never null unless no monitor can be resolved at all.
+    HMONITOR layoutMonitor() const;
     bool updateDpiFromOwner(HWND owner);
     void refreshOwnedFonts();
 
@@ -192,6 +202,10 @@ private:
     bool useCursor_;
     bool hasAnchorRect_;
     RECT anchorRect_;
+    // Monitor the layout currently in effect was computed against; null before the first
+    // layout. Compared against layoutMonitor() to detect a same-DPI monitor switch, which
+    // changes the work-area width cap without changing the DPI or the candidate content.
+    HMONITOR layoutMonitor_;
 };
 
 } // namespace Moqi

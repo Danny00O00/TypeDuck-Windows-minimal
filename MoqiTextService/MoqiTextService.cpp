@@ -1113,6 +1113,12 @@ void TextService::updateCandidates(Ime::EditSession* session) {
 		hasAppliedCandidateCursor_ = false;
 	}
 
+	// Unchanged content is not re-laid-out above, so a same-DPI move onto a narrower monitor
+	// would keep the previous monitor's width here too. No-op when the anchor still resolves to
+	// the monitor the current layout was computed against (always so on a single monitor, and
+	// always so when the recalculateSize() above just ran).
+	candidateWindow_->relayoutForAnchorMonitor();
+
 	moveCandidateWindowToInputRect(session, L"updateCandidates", true);
 	if (contentChanged) {
 		candidateWindow_->refresh();
@@ -1140,8 +1146,24 @@ void TextService::updateCandidatesWindow(Ime::EditSession* session) {
     }
     ensureCandidateWindowValid(L"updateCandidatesWindow");
     if (candidateWindow_) {
+        // A layout change can be a pure MOVE: the host window (and with it the caret) lands on
+        // another display while no candidate content changes. Push the new caret anchor BEFORE
+        // the sizing step -- syncOwner() re-resolves the DPI from the anchor's monitor and can
+        // re-run the layout itself, so with a stale anchor it would size against the monitor
+        // the popup is leaving.
+        RECT anchorRect{};
+        if (candidateAnchorRect(session, &anchorRect)) {
+            candidateWindow_->setAnchorRect(anchorRect);
+        }
         candidateWindow_->syncOwner(session);
-		moveCandidateWindowToInputRect(session, L"updateCandidatesWindow", true);
+        // syncOwner() re-lays-out only when the DPI changed. Between two SAME-DPI monitors the
+        // work-area width cap still changes, so a move onto a narrower display would otherwise
+        // keep the wide monitor's width and overflow it. Re-run the layout when the anchor
+        // resolved to a different monitor than the current layout was computed against; this is
+        // a no-op on a single monitor, so that sizing path stays untouched.
+        candidateWindow_->relayoutForAnchorMonitor();
+        // After the (possible) resize, so the placement clamp measures the new popup size.
+        moveCandidateWindowToInputRect(session, L"updateCandidatesWindow", true);
 	}
 }
 

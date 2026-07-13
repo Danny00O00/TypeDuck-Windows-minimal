@@ -22,6 +22,10 @@ constexpr const char* kPreferencesFileName = "TypeDuckPreferences.json";
 constexpr const char* kJsonSource = "TypeDuckPreferences.json";
 constexpr const char* kApplyFailureMessage =
     "設定未能套用，已保留原有設定 / Settings could not be applied; existing settings were kept";
+constexpr const char* kInvalidFileMessage =
+    "設定檔無效，已使用預設值 / Settings file is invalid; defaults were loaded";
+constexpr const char* kUnreadableFileMessage =
+    "設定檔未能讀取，已使用預設值 / Settings file could not be read; defaults were loaded";
 
 const std::vector<std::string>& languageOrder() {
   static const std::vector<std::string> languages{"eng", "hin", "ind", "nep", "urd"};
@@ -323,72 +327,113 @@ std::filesystem::path defaultPreferencesPath() {
   return roaming / "TypeDuckIME" / kPreferencesFileName;
 }
 
-ValidationResult loadPreferences(const std::filesystem::path& path) {
-  std::ifstream stream(path, std::ios::binary);
-  if (!stream.is_open()) {
-    auto defaults = defaultPreferences();
-    return {true, defaults, ""};
-  }
-
-  Json::CharReaderBuilder builder;
-  Json::Value root;
-  std::string errors;
-  if (!Json::parseFromStream(builder, stream, &root, &errors) || !root.isObject()) {
-    return {false, defaultPreferences(),
-            "設定檔無效，已使用預設值 / Settings file is invalid; defaults were loaded"};
-  }
-  auto result = validatePreferences(preferencesFromJson(root));
-  if (!result.ok && result.message.empty()) {
-    result.message =
-        "設定檔無效，已使用預設值 / Settings file is invalid; defaults were loaded";
-  }
-  return result;
+bool preferencesWereReadFromFile(const ValidationResult& result) {
+  return result.source == PreferencesSource::File;
 }
 
+// Never throws; see the contract on the declaration. Failures do not just have
+// to be survivable, they have to be HONEST: a result that carries defaults must
+// say so, because a caller comparing the loaded value with the value it is about
+// to write cannot otherwise tell a stored false from an invented one.
+ValidationResult loadPreferences(const std::filesystem::path& path) {
+  try {
+    std::ifstream stream(path, std::ios::binary);
+    if (!stream.is_open()) {
+      // "Not there" and "there but denied" both fail to open, and they mean
+      // opposite things: absent means defaults ARE the state on disk (first
+      // run), denied means the state on disk is unknown and must not be guessed.
+      // If exists() itself fails (a denied parent directory, for instance) we do
+      // not know either -- and "unknown" is the answer that makes callers save,
+      // retry and warn instead of assuming.
+      std::error_code ec;
+      const bool present = std::filesystem::exists(path, ec);
+      if (!present && !ec) {
+        return {true, defaultPreferences(), "", PreferencesSource::Absent};
+      }
+      return {false, defaultPreferences(), kUnreadableFileMessage,
+              PreferencesSource::Unreadable};
+    }
+
+    Json::CharReaderBuilder builder;
+    Json::Value root;
+    std::string errors;
+    if (!Json::parseFromStream(builder, stream, &root, &errors) || !root.isObject()) {
+      return {false, defaultPreferences(), kInvalidFileMessage,
+              PreferencesSource::Unreadable};
+    }
+    auto result = validatePreferences(preferencesFromJson(root));
+    // The bytes really came off the disk, even if some of the values in them
+    // were out of range and got normalized away.
+    result.source = PreferencesSource::File;
+    if (!result.ok && result.message.empty()) {
+      result.message = kInvalidFileMessage;
+    }
+    return result;
+  } catch (const std::exception&) {
+    // jsoncpp raises Json::Exception (a std::exception) when a document nests
+    // past its stack limit -- roughly 1,000 levels, which a corrupt or hostile
+    // file reaches trivially. This runs on the libuv loop thread ahead of reply
+    // forwarding, so it degrades to defaults instead of unwinding through it.
+    return {false, defaultPreferences(), kUnreadableFileMessage,
+            PreferencesSource::Unreadable};
+  } catch (...) {
+    return {false, defaultPreferences(), kUnreadableFileMessage,
+            PreferencesSource::Unreadable};
+  }
+}
+
+// Never throws: the merge base is parsed from disk, and Json::writeString can
+// raise as well. The Shift toggle drives this from the libuv loop thread.
 SaveResult savePreferences(const std::filesystem::path& path,
                            const Preferences& preferences) {
-  const auto result = validatePreferences(preferences);
-  if (!result.ok) {
-    return {false, result.message};
-  }
-  std::error_code ec;
-  std::filesystem::create_directories(path.parent_path(), ec);
-  if (ec) {
-    return {false, kApplyFailureMessage};
-  }
-
-  Json::StreamWriterBuilder builder;
-  builder["indentation"] = "  ";
-  // Merge onto whatever is already on disk (read before the temp file is opened)
-  // so keys this build does not model are preserved rather than erased.
-  const Json::Value document =
-      preferencesToJson(result.preferences, existingPreferencesJson(path));
-  // Write to a sibling temp file and rename over the target so a crash or a
-  // full disk mid-write can never leave a truncated preferences file behind.
-  const auto tempPath =
-      path.parent_path() / (path.filename().string() + ".tmp");
-  {
-    std::ofstream stream(tempPath, std::ios::binary | std::ios::trunc);
-    if (!stream.is_open()) {
+  try {
+    const auto result = validatePreferences(preferences);
+    if (!result.ok) {
+      return {false, result.message};
+    }
+    std::error_code ec;
+    std::filesystem::create_directories(path.parent_path(), ec);
+    if (ec) {
       return {false, kApplyFailureMessage};
     }
-    stream << Json::writeString(builder, document);
-    stream.flush();
-    if (!stream.good()) {
-      stream.close();
+
+    Json::StreamWriterBuilder builder;
+    builder["indentation"] = "  ";
+    // Merge onto whatever is already on disk (read before the temp file is opened)
+    // so keys this build does not model are preserved rather than erased.
+    const Json::Value document =
+        preferencesToJson(result.preferences, existingPreferencesJson(path));
+    // Write to a sibling temp file and rename over the target so a crash or a
+    // full disk mid-write can never leave a truncated preferences file behind.
+    const auto tempPath =
+        path.parent_path() / (path.filename().string() + ".tmp");
+    {
+      std::ofstream stream(tempPath, std::ios::binary | std::ios::trunc);
+      if (!stream.is_open()) {
+        return {false, kApplyFailureMessage};
+      }
+      stream << Json::writeString(builder, document);
+      stream.flush();
+      if (!stream.good()) {
+        stream.close();
+        std::error_code removeEc;
+        std::filesystem::remove(tempPath, removeEc);
+        return {false, kApplyFailureMessage};
+      }
+    }
+    std::error_code renameEc;
+    std::filesystem::rename(tempPath, path, renameEc);
+    if (renameEc) {
       std::error_code removeEc;
       std::filesystem::remove(tempPath, removeEc);
       return {false, kApplyFailureMessage};
     }
-  }
-  std::error_code renameEc;
-  std::filesystem::rename(tempPath, path, renameEc);
-  if (renameEc) {
-    std::error_code removeEc;
-    std::filesystem::remove(tempPath, removeEc);
+    return {true, kJsonSource};
+  } catch (const std::exception&) {
+    return {false, kApplyFailureMessage};
+  } catch (...) {
     return {false, kApplyFailureMessage};
   }
-  return {true, kJsonSource};
 }
 
 ApplyResult applyPreferences(const std::filesystem::path& path,

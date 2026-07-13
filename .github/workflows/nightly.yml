@@ -173,86 +173,21 @@ jobs:
           }
 
       - name: Run backend Go tests
-        working-directory: ${{ github.workspace }}/TypeDuck-Windows-backend
         run: |
-          # Every backend package EXCEPT input_methods/rime is green and runs unfiltered.
-          # The list is derived from `go list` instead of being hard-coded, so a new backend
-          # package gets tested automatically rather than silently skipped.
-          $allPackages = go list ./...
-          if ($LASTEXITCODE -ne 0) {
-            throw "go list ./... failed."
-          }
-          $packages = @($allPackages | Where-Object { $_ -notmatch '/input_methods/rime$' })
-          if ($packages.Count -eq 0) {
-            throw "go list ./... returned no packages."
-          }
-          go test $packages
-          if ($LASTEXITCODE -ne 0) {
-            throw "Backend go test failed."
+          # The test scoping, the Shift/asciiMode run allowlist and the KNOWN-UPSTREAM-RED
+          # denylist all live in ONE script, checked into the backend repo (it owns the tests).
+          # The backend's own .github/workflows/backend-tests.yml calls the very same script on
+          # push/PR, so the two repos cannot drift apart. Read that script for the full rationale
+          # on why input_methods/rime is not run in full.
+          $backendRoot = Join-Path $env:GITHUB_WORKSPACE "TypeDuck-Windows-backend"
+          $testScript = Join-Path $backendRoot ".github\workflows\Invoke-TypeDuckBackendTests.ps1"
+          if (-not (Test-Path -LiteralPath $testScript -PathType Leaf)) {
+            throw "Backend test script not found: $testScript"
           }
 
-          # input_methods/rime is the one package we cannot run in full, because a large part
-          # of it is ALREADY RED UPSTREAM -- before, and independently of, the TypeDuck
-          # Shift/asciiMode feature. Those tests need a populated rime runtime or the original
-          # developer's machine, for example:
-          #   * TestHandleRequestSyncsAppearanceAcrossInstances and
-          #     TestLoadAppearancePrefsKeepsPresetThemeAfterPersist expect a theme named
-          #     "purple"; only 2 themes are loaded in CI and that is not one of them.
-          #   * TestAppearanceSettingsPersistToDisk expects appearance_config.json in a
-          #     directory that the code under test never creates.
-          #   * TestDownloadSchemeSetCommandInstallsSelectsAndRedeploys wants to download a
-          #     scheme set, and the custom-phrase overlay tests need on-disk phrase data.
-          #   * wubi_debug_test.go and z_probe_sentence_candidates_test.go are hard-coded to
-          #     the original developer's own drive paths.
-          # Upstream never ran `go test` in CI, which is why none of this was noticed. Those
-          # tests are not ours and we do not claim them as green. We equally refuse to let
-          # them mask a regression in the code we DO own, so rather than skipping the package
-          # we run our own tests out of it by exact name. Keep this list in sync with
-          # input_methods/rime/rime_test.go.
-          $featureTests = @(
-            'TestBareShiftDownPassesThroughAndIsNotForwardedToRime'
-            'TestLoneLeftShiftTogglesAsciiMode'
-            'TestLoneRightShiftTogglesAsciiMode'
-            'TestShiftWithLetterDoesNotToggle'
-            'TestCtrlShiftDoesNotToggle'
-            'TestShiftAutoRepeatTogglesOnce'
-            'TestShiftToggleWithCompositionCommitsRawInput'
-            'TestShiftToggleBackToChineseAllowsComposing'
-            'TestShiftToggleResponseCarriesSettingsUpdateOnlyOnToggle'
-            'TestShiftTogglePropagatesAcrossInstances'
-            'TestShiftTogglePublishesAsciiModeWithoutSchemaSaveOptions'
-            'TestShiftToggleDoesNotLogTypedContent'
-            'TestSettingsUpdateAsciiModeAppliesWithoutRedeploy'
-            'TestSettingsUpdateAsciiModePropagatesToExistingInstance'
-            'TestNewSessionInheritsAsciiMode'
-            'TestAsciiModeSurvivesRedeployAndSchemaSwitch'
-            'TestCapsLockStillForwardedToRime'
-            'TestOnCommandAsciiToggleAttachesSettingsUpdate'
-            'TestOnCommandModeIconTogglePersistsWithoutExistingSession'
-            'TestProcessKeySyncsSharedInputStateAfterShiftAndCapsToggle'
-          )
-          # Fully anchored alternation: it cannot partially match an upstream test name.
-          $runPattern = '^(' + ($featureTests -join '|') + ')$'
-
-          # A -run pattern that matches nothing still exits 0, so a typo or a renamed test
-          # would quietly turn this guard into a no-op that tests nothing. Assert the
-          # selection before trusting the result.
-          $selected = @(go test -list $runPattern ./input_methods/rime | Where-Object { $_ -match '^Test' })
+          pwsh -NoProfile -ExecutionPolicy Bypass -File $testScript -RepoRoot $backendRoot
           if ($LASTEXITCODE -ne 0) {
-            throw "go test -list failed for input_methods/rime."
-          }
-          $missing = @($featureTests | Where-Object { $selected -notcontains $_ })
-          if ($missing.Count -gt 0) {
-            throw "Stale TypeDuck feature-test list: $($missing -join ', ') no longer exist in input_methods/rime."
-          }
-          if ($selected.Count -ne $featureTests.Count) {
-            throw "Expected $($featureTests.Count) TypeDuck feature tests in input_methods/rime, -run selected $($selected.Count)."
-          }
-          Write-Host "Running $($selected.Count) TypeDuck Shift/asciiMode tests from input_methods/rime."
-
-          go test -run $runPattern -v ./input_methods/rime
-          if ($LASTEXITCODE -ne 0) {
-            throw "Backend go test failed (TypeDuck Shift/asciiMode feature tests)."
+            throw "Backend Go tests failed."
           }
 
       - name: Prepare installer asset name

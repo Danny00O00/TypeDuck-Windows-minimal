@@ -219,41 +219,66 @@ TypeDuck::ApplyResult BackendServer::requestTypeDuckDeploy() {
 }
 
 void BackendServer::persistTypeDuckAsciiMode(bool asciiMode) {
-  const auto path = TypeDuck::defaultPreferencesPath();
-  auto loaded = TypeDuck::loadPreferences(path);
-  if (loaded.preferences.asciiMode == asciiMode) {
-    return;
-  }
-  loaded.preferences.asciiMode = asciiMode;
+  // Runs on the libuv loop thread, inside handleBackendReply(), BEFORE the reply
+  // is routed to the clients. An exception escaping here would unwind straight
+  // through the reply-forwarding loop and take typing down with it, so this
+  // whole body is a no-throw region: loadPreferences() and savePreferences()
+  // already degrade instead of throwing, and this catch-all is the backstop for
+  // everything else that can (allocation, the logger, the tray queue).
+  try {
+    const auto path = TypeDuck::defaultPreferencesPath();
 
-  // Bounded, immediate retries; see kAsciiModePersistAttempts. Persistence is
-  // best-effort and must NEVER block or fail the reply-forwarding path: this
-  // function returns void, cannot throw, and the caller forwards the backend
-  // reply to the TSF client regardless of what happens here.
-  for (int attempt = 1; attempt <= kAsciiModePersistAttempts; ++attempt) {
-    const auto saved = TypeDuck::savePreferences(path, loaded.preferences);
-    if (saved.ok) {
-      // Re-arm the warning so a later failure streak can notify again.
-      asciiPersistFailureNotified_ = false;
-      return;
+    // Bounded, immediate retries; see kAsciiModePersistAttempts. Persistence is
+    // best-effort and must NEVER block or fail the reply-forwarding path: this
+    // function returns void, cannot throw, and the caller forwards the backend
+    // reply to the TSF client regardless of what happens here.
+    for (int attempt = 1; attempt <= kAsciiModePersistAttempts; ++attempt) {
+      // Re-read on every attempt. A read that lost a race a moment ago may win
+      // the next one, and merging the new mode onto the file that is actually
+      // there beats merging it onto invented defaults.
+      auto loaded = TypeDuck::loadPreferences(path);
+
+      // ONLY a value read back out of the file proves the mode is already
+      // stored. A failed read hands back DEFAULTS, and skipping the save on
+      // those is how the state used to get lost: disk holds true, the file goes
+      // unreadable, the user toggles to false, the default false "matches", we
+      // return believing it is saved -- and the next restart hands the user back
+      // true, the exact opposite of what they asked for, with no save, no retry
+      // and no warning. An unreadable file must fall through to the save below.
+      if (TypeDuck::preferencesWereReadFromFile(loaded) &&
+          loaded.preferences.asciiMode == asciiMode) {
+        return;
+      }
+      loaded.preferences.asciiMode = asciiMode;
+
+      const auto saved = TypeDuck::savePreferences(path, loaded.preferences);
+      if (saved.ok) {
+        // Re-arm the warning so a later failure streak can notify again.
+        asciiPersistFailureNotified_ = false;
+        return;
+      }
+      // Logs record only the backend name and the attempt counter - never any
+      // typed content.
+      logger()->warn(
+          "Failed to persist TypeDuck ascii mode for backend {} (attempt {}/{})",
+          name_, attempt, kAsciiModePersistAttempts);
     }
-    // Logs record only the backend name and the attempt counter - never any
-    // typed content.
-    logger()->warn(
-        "Failed to persist TypeDuck ascii mode for backend {} (attempt {}/{})",
-        name_, attempt, kAsciiModePersistAttempts);
-  }
 
-  // Every attempt failed: the user's Chinese/English mode will silently revert
-  // on the next restart, so say so once. enqueueTrayNotification() only takes a
-  // mutex and PostMessage()s, so it does not block this loop thread.
-  if (!asciiPersistFailureNotified_) {
-    asciiPersistFailureNotified_ = true;
-    pipeServer_->enqueueTrayNotification(
-        L"TypeDuck",
-        L"中英模式未能儲存，重新啟動後會回復原本設定 / Could not save the "
-        L"Chinese/English input mode; it will revert after a restart",
-        NIIF_WARNING);
+    // Every attempt failed: the user's Chinese/English mode will silently revert
+    // on the next restart, so say so once. enqueueTrayNotification() only takes a
+    // mutex and PostMessage()s, so it does not block this loop thread.
+    if (!asciiPersistFailureNotified_) {
+      asciiPersistFailureNotified_ = true;
+      pipeServer_->enqueueTrayNotification(
+          L"TypeDuck",
+          L"中英模式未能儲存，重新啟動後會回復原本設定 / Could not save the "
+          L"Chinese/English input mode; it will revert after a restart",
+          NIIF_WARNING);
+    }
+  } catch (...) {
+    // Swallowed on purpose: the caller must go on forwarding backend replies.
+    // Nothing is logged here - the logger is one of the few things that could
+    // have thrown in the first place.
   }
 }
 

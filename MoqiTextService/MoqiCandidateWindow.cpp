@@ -536,7 +536,8 @@ CandidateWindow::CandidateWindow(Ime::TextService* service, Ime::EditSession* se
       trackingMouse_(false),
       useCursor_(false),
       hasAnchorRect_(false),
-      anchorRect_{} {
+      anchorRect_{},
+      layoutMonitor_(nullptr) {
     margin_ = 0;
 
     const HWND rawOwner = resolveCandidateOwnerWindow(session);
@@ -977,6 +978,47 @@ HMONITOR CandidateWindow::anchorMonitor() const {
     return ::MonitorFromRect(&anchorRect_, MONITOR_DEFAULTTONEAREST);
 }
 
+HMONITOR CandidateWindow::layoutMonitor() const {
+    if (HMONITOR monitor = anchorMonitor()) {
+        return monitor;
+    }
+    // No anchor pushed yet: fall back to the owner window's monitor, exactly as the sizing
+    // step did before setAnchorRect() existed.
+    const HWND owner =
+        hwnd_ ? reinterpret_cast<HWND>(::GetWindowLongPtr(hwnd_, GWLP_HWNDPARENT)) : nullptr;
+    return ::MonitorFromWindow(owner ? owner : hwnd_, MONITOR_DEFAULTTONEAREST);
+}
+
+bool CandidateWindow::relayoutForAnchorMonitor() {
+    if (!hwnd_) {
+        return false;
+    }
+    const HMONITOR monitor = layoutMonitor();
+    if (monitor == nullptr || monitor == layoutMonitor_) {
+        // Same monitor (the single-monitor case always lands here): the width cap in
+        // recalculateSize() would produce exactly the layout already in effect.
+        return false;
+    }
+
+    recalculateSize();
+    // recalculateSize() -> resizeForLayout() resizes the layered popup with SWP_NOREDRAW
+    // (blink regression fix), so the resize queues no repaint and applyWindowShape() is a
+    // no-op for layered windows: the layered surface would keep the previous monitor's
+    // bitmap at the old size. Push one fresh surface at the new size, exactly as the
+    // DPI-change path in syncOwner() does.
+    if (usesLayeredPresentation()) {
+        presentLayeredSurface();
+    } else {
+        ::InvalidateRect(hwnd_, NULL, TRUE);
+    }
+
+    std::wostringstream log;
+    log << L"[CandidateWindow::relayoutForAnchorMonitor] monitor changed, resized width="
+        << candidatePanelWidth_ << L" height=" << candidatePanelHeight_;
+    appendCandidateWindowLog(log.str());
+    return true;
+}
+
 bool CandidateWindow::updateDpiFromOwner(HWND owner) {
     const DpiPair dpi = dpiForOwnerWindow(owner ? owner : hwnd_, anchorMonitor());
     if (dpi.x == dpiX_ && dpi.y == dpiY_) {
@@ -1013,7 +1055,15 @@ void CandidateWindow::refreshOwnedFonts() {
 
 void CandidateWindow::recalculateSize() {
     ThreadDpiAwarenessScope dpiScope;
+    // Monitor this layout is sized against (the caret anchor's, falling back to the owner
+    // window's). It is committed to layoutMonitor_ only on the paths that actually lay out, so
+    // a bailed-out call cannot mark a stale layout as current. A later pure layout change can
+    // move the popup onto a monitor of the SAME DPI but a narrower work area, which changes the
+    // width cap below without changing either the DPI or the candidate content;
+    // relayoutForAnchorMonitor() compares against layoutMonitor_ to notice exactly that.
+    const HMONITOR monitor = layoutMonitor();
     if (items_.empty() && preedit_.empty()) {
+        layoutMonitor_ = monitor;
         selKeyWidth_ = 0;
         textWidth_ = 0;
         commentWidth_ = 0;
@@ -1029,8 +1079,11 @@ void CandidateWindow::recalculateSize() {
 
     HDC hdc = ::GetWindowDC(hwnd());
     if (!hdc) {
+        // Nothing was laid out: leave layoutMonitor_ alone so the next
+        // relayoutForAnchorMonitor() still sees the pending monitor change and retries.
         return;
     }
+    layoutMonitor_ = monitor;
 
     const int scaledPadX = scalePx(textService_->isImmersive() ? kImmersivePanelPaddingX : kPanelPaddingX);
     const int scaledPadY = scalePx(textService_->isImmersive() ? kImmersivePanelPaddingY : kPanelPaddingY);
@@ -1125,13 +1178,8 @@ void CandidateWindow::recalculateSize() {
         // same monitor clampCandidateWindowToWorkArea() clamps to and the same one the DPI
         // in scalePx() came from), not the owner's monitor: an owner window straddling two
         // displays is measured on its majority monitor while the caret may sit on the other.
-        HMONITOR monitor = anchorMonitor();
-        if (monitor == nullptr) {
-            const HWND owner = hwnd_
-                ? reinterpret_cast<HWND>(::GetWindowLongPtr(hwnd_, GWLP_HWNDPARENT))
-                : nullptr;
-            monitor = ::MonitorFromWindow(owner ? owner : hwnd_, MONITOR_DEFAULTTONEAREST);
-        }
+        // |monitor| was resolved at the top of this function by layoutMonitor(): the caret
+        // anchor's monitor, or the owner window's when no anchor has been pushed yet.
         MONITORINFO monitorInfo = {};
         monitorInfo.cbSize = sizeof(monitorInfo);
         if (monitor != nullptr && ::GetMonitorInfoW(monitor, &monitorInfo)) {
@@ -1409,21 +1457,32 @@ void CandidateWindow::paintInputBuffer(HDC hdc, const RECT& panelRc) {
 
     const int plainMargin = scalePx(kPreeditPlainMargin);
     const int activePadX = scalePx(kPreeditActivePaddingX);
-    int x = preeditRc.left;
+    // The strip has a fixed width (recalculateSize() bounds the preedit against the work area)
+    // and every segment is drawn with DT_END_ELLIPSIS clipped to its right edge. So a long
+    // "before" segment can be ellipsis-clipped on screen while still MEASURING far wider than
+    // the strip: advancing the running x by that full measured width pushes it past the right
+    // edge and leaves the active segment with left > right -- an inverted rect, and the
+    // highlighted syllable simply disappears. Clamp x to the strip instead, so the active and
+    // after segments are clipped to whatever room is left and skipped once the strip is full,
+    // and no rect can ever invert.
+    const int stripLeft = static_cast<int>(preeditRc.left);
+    const int stripRight = (std::max)(stripLeft, static_cast<int>(preeditRc.right));
+    int x = stripLeft;
 
     if (!before.empty()) {
-        RECT beforeRc = {x + plainMargin, preeditRc.top, preeditRc.right, preeditRc.bottom};
+        RECT beforeRc = {(std::min)(x + plainMargin, stripRight), preeditRc.top, preeditRc.right,
+                         preeditRc.bottom};
         ::SetTextColor(hdc, kItemText);
         ::DrawTextW(hdc, before.c_str(), static_cast<int>(before.length()), &beforeRc,
                     DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
-        x += textWidth(before) + plainMargin * 2;
+        x = (std::min)(stripRight, x + textWidth(before) + plainMargin * 2);
     }
 
     const int activeWidth = textWidth(active);
     RECT activeRc = {x, preeditRc.top, x, preeditRc.bottom};
     RECT activeTextRc = activeRc;
-    if (!active.empty() && activeWidth > 0) {
-        activeRc.right = (std::min)(static_cast<int>(preeditRc.right), x + activeWidth + activePadX * 2);
+    if (!active.empty() && activeWidth > 0 && x < stripRight) {
+        activeRc.right = (std::min)(stripRight, x + activeWidth + activePadX * 2);
         HBRUSH inputBrush = ::CreateSolidBrush(kInputBufferBackground);
         HRGN activeRgn = ::CreateRoundRectRgn(activeRc.left, activeRc.top, activeRc.right + 1,
                                               activeRc.bottom + 1,
@@ -1433,16 +1492,20 @@ void CandidateWindow::paintInputBuffer(HDC hdc, const RECT& panelRc) {
         ::DeleteObject(activeRgn);
         ::DeleteObject(inputBrush);
 
+        // Keep the inner text rect inside the (possibly clipped) highlight: on the last few
+        // pixels of the strip the two-sided padding can exceed the remaining highlight width.
+        // Both clamps are no-ops whenever the highlight was not clipped.
         activeTextRc = activeRc;
-        activeTextRc.left += activePadX;
-        activeTextRc.right -= activePadX;
+        activeTextRc.left = (std::min)(activeTextRc.left + activePadX, activeRc.right);
+        activeTextRc.right = (std::max)(activeTextRc.left, activeRc.right - activePadX);
         ::SetTextColor(hdc, kInputBufferText);
         ::DrawTextW(hdc, active.c_str(), static_cast<int>(active.length()), &activeTextRc,
                     DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
         x = activeRc.right;
     }
-    if (!after.empty() && x < preeditRc.right) {
-        RECT afterRc = {x + plainMargin, preeditRc.top, preeditRc.right, preeditRc.bottom};
+    if (!after.empty() && x < stripRight) {
+        RECT afterRc = {(std::min)(x + plainMargin, stripRight), preeditRc.top, preeditRc.right,
+                        preeditRc.bottom};
         ::SetTextColor(hdc, kItemText);
         ::DrawTextW(hdc, after.c_str(), static_cast<int>(after.length()), &afterRc,
                     DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
