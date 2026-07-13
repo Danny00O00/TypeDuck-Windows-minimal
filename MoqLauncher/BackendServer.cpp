@@ -48,6 +48,19 @@ namespace Moqi {
 static wstring_convert<codecvt_utf8<wchar_t>> utf8Codec;
 static constexpr auto MAX_RESPONSE_WAITING_TIME =
     30; // if a backend is non-responsive for 30 seconds, it's considered dead
+
+// How many times persistTypeDuckAsciiMode() re-tries a failed save before it
+// gives up and warns the user. The realistic transient failure is a momentarily
+// locked TypeDuckPreferences.json (antivirus, backup, the settings app mid-save):
+// on Windows the rename inside savePreferences() then fails with a sharing
+// violation and typically succeeds again milliseconds later. Retrying is safe
+// because savePreferences() is atomic (temp file + rename), so a failed attempt
+// leaves the previous file byte-for-byte intact and can never tear or duplicate
+// it. The retries are IMMEDIATE - no sleep, no backoff - because this runs on
+// the launcher's libuv loop thread, the same thread that forwards backend
+// replies to every connected client; sleeping here would stall typing globally.
+static constexpr int kAsciiModePersistAttempts = 3;
+
 namespace {
 
 } // namespace
@@ -212,9 +225,35 @@ void BackendServer::persistTypeDuckAsciiMode(bool asciiMode) {
     return;
   }
   loaded.preferences.asciiMode = asciiMode;
-  const auto saved = TypeDuck::savePreferences(path, loaded.preferences);
-  if (!saved.ok) {
-    logger()->warn("Failed to persist TypeDuck ascii mode for backend {}", name_);
+
+  // Bounded, immediate retries; see kAsciiModePersistAttempts. Persistence is
+  // best-effort and must NEVER block or fail the reply-forwarding path: this
+  // function returns void, cannot throw, and the caller forwards the backend
+  // reply to the TSF client regardless of what happens here.
+  for (int attempt = 1; attempt <= kAsciiModePersistAttempts; ++attempt) {
+    const auto saved = TypeDuck::savePreferences(path, loaded.preferences);
+    if (saved.ok) {
+      // Re-arm the warning so a later failure streak can notify again.
+      asciiPersistFailureNotified_ = false;
+      return;
+    }
+    // Logs record only the backend name and the attempt counter - never any
+    // typed content.
+    logger()->warn(
+        "Failed to persist TypeDuck ascii mode for backend {} (attempt {}/{})",
+        name_, attempt, kAsciiModePersistAttempts);
+  }
+
+  // Every attempt failed: the user's Chinese/English mode will silently revert
+  // on the next restart, so say so once. enqueueTrayNotification() only takes a
+  // mutex and PostMessage()s, so it does not block this loop thread.
+  if (!asciiPersistFailureNotified_) {
+    asciiPersistFailureNotified_ = true;
+    pipeServer_->enqueueTrayNotification(
+        L"TypeDuck",
+        L"中英模式未能儲存，重新啟動後會回復原本設定 / Could not save the "
+        L"Chinese/English input mode; it will revert after a restart",
+        NIIF_WARNING);
   }
 }
 

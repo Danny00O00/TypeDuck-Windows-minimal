@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <exception>
 #include <fstream>
 #include <iterator>
 #include <set>
@@ -36,8 +37,41 @@ bool isKnownRomanizationMode(const std::string& value) {
   return value == "always" || value == "reverse_only" || value == "never";
 }
 
-Json::Value preferencesToJson(const Preferences& preferences) {
-  Json::Value root;
+// Loads the raw JSON document currently on disk, to be used as a merge base by
+// preferencesToJson. A missing, unreadable, unparseable, or non-object file
+// degrades to an empty object rather than propagating a failure: savePreferences
+// must never be wedged by a corrupt file, or a single bad byte would jam both
+// the Shift toggle and the settings dialog forever. Never throws — jsoncpp
+// raises Json::Exception (e.g. on a document nested past its stack limit), so
+// the parse is guarded.
+Json::Value existingPreferencesJson(const std::filesystem::path& path) {
+  try {
+    std::ifstream stream(path, std::ios::binary);
+    if (!stream.is_open()) {
+      return Json::Value(Json::objectValue);
+    }
+    Json::CharReaderBuilder builder;
+    Json::Value root;
+    std::string errors;
+    if (!Json::parseFromStream(builder, stream, &root, &errors) || !root.isObject()) {
+      return Json::Value(Json::objectValue);
+    }
+    return root;
+  } catch (const std::exception&) {
+    return Json::Value(Json::objectValue);
+  }
+}
+
+// `root` is the document already on disk (see existingPreferencesJson). We
+// overwrite only the keys this build models and leave every other key untouched,
+// so a preference written by a newer build, a hand edit, or a settings app this
+// binary predates survives the rewrite. Starting from a fresh Json::Value would
+// silently ERASE those keys — and since the Shift toggle persists asciiMode on
+// every press, that erasure would land on the very first keystroke.
+Json::Value preferencesToJson(const Preferences& preferences, Json::Value root) {
+  if (!root.isObject()) {
+    root = Json::Value(Json::objectValue);
+  }
   Json::Value languages(Json::arrayValue);
   for (const auto& language : preferences.displayLanguages) {
     languages.append(language);
@@ -325,6 +359,10 @@ SaveResult savePreferences(const std::filesystem::path& path,
 
   Json::StreamWriterBuilder builder;
   builder["indentation"] = "  ";
+  // Merge onto whatever is already on disk (read before the temp file is opened)
+  // so keys this build does not model are preserved rather than erased.
+  const Json::Value document =
+      preferencesToJson(result.preferences, existingPreferencesJson(path));
   // Write to a sibling temp file and rename over the target so a crash or a
   // full disk mid-write can never leave a truncated preferences file behind.
   const auto tempPath =
@@ -334,7 +372,7 @@ SaveResult savePreferences(const std::filesystem::path& path,
     if (!stream.is_open()) {
       return {false, kApplyFailureMessage};
     }
-    stream << Json::writeString(builder, preferencesToJson(result.preferences));
+    stream << Json::writeString(builder, document);
     stream.flush();
     if (!stream.good()) {
       stream.close();

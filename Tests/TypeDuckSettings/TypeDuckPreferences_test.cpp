@@ -2,6 +2,8 @@
 
 #include "MoqLauncher/TypeDuckPreferences.h"
 
+#include <json/json.h>
+
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
@@ -21,6 +23,23 @@ std::string readFile(const std::filesystem::path& path) {
   std::ifstream stream(path, std::ios::binary);
   return std::string((std::istreambuf_iterator<char>(stream)),
                      std::istreambuf_iterator<char>());
+}
+
+void writeFile(const std::filesystem::path& path, const std::string& contents) {
+  std::ofstream stream(path, std::ios::binary | std::ios::trunc);
+  stream << contents;
+}
+
+// Reads the file back as raw JSON so a test can assert on keys the Preferences
+// struct does not model (and therefore cannot observe through loadPreferences).
+bool parseJsonFile(const std::filesystem::path& path, Json::Value* root) {
+  std::ifstream stream(path, std::ios::binary);
+  if (!stream.is_open()) {
+    return false;
+  }
+  Json::CharReaderBuilder builder;
+  std::string errors;
+  return Json::parseFromStream(builder, stream, root, &errors);
 }
 
 } // namespace
@@ -255,4 +274,94 @@ TEST(TypeDuckPreferences, FailedApplyDoesNotCorruptJsonSourceOfTruth) {
   EXPECT_NE(failed.message.find("設定"), std::string::npos);
   EXPECT_NE(failed.message.find("Settings"), std::string::npos);
   EXPECT_EQ(readFile(path), before);
+}
+
+TEST(TypeDuckPreferences, UnknownJsonKeysSurviveSaveLoadRoundTrip) {
+  // savePreferences rewrites the whole file, and the Shift toggle now rewrites
+  // it on every press. A key this build does not model -- one written by a newer
+  // settings app, a hand edit, or a build the user later downgraded from -- must
+  // survive that rewrite. Without the merge base it is erased on the very first
+  // Shift press, which is when the user is least expecting to lose settings.
+  const auto root = makeTempDir("typeduck-unknown-keys-test");
+  const auto path = root / "preferences.json";
+  writeFile(path, R"({
+  "displayLanguages": ["eng"],
+  "mainLanguage": "eng",
+  "pageSize": 8,
+  "isHeiTypeface": true,
+  "showRomanization": "never",
+  "enableCompletion": true,
+  "enableCorrection": true,
+  "enableSentence": true,
+  "enableLearning": true,
+  "showReverseCode": false,
+  "isCangjie5": true,
+  "asciiMode": false,
+  "futureScalarSetting": "keep-me",
+  "futureObjectSetting": {"nested": 42}
+})");
+
+  // Exactly what the Shift toggle does: load, flip asciiMode, save.
+  const auto loaded = Moqi::TypeDuck::loadPreferences(path);
+  ASSERT_TRUE(loaded.ok) << loaded.message;
+  auto toggled = loaded.preferences;
+  toggled.asciiMode = true;
+  ASSERT_TRUE(Moqi::TypeDuck::savePreferences(path, toggled).ok);
+
+  Json::Value rewritten;
+  ASSERT_TRUE(parseJsonFile(path, &rewritten));
+
+  // The unmodelled keys are still there, values intact.
+  EXPECT_EQ(rewritten["futureScalarSetting"].asString(), "keep-me");
+  EXPECT_EQ(rewritten["futureObjectSetting"]["nested"].asInt(), 42);
+
+  // ...and the modelled keys were still written correctly on top of them.
+  EXPECT_TRUE(rewritten["asciiMode"].asBool());
+  EXPECT_EQ(rewritten["pageSize"].asInt(), 8);
+  EXPECT_TRUE(rewritten["isHeiTypeface"].asBool());
+  EXPECT_EQ(rewritten["showRomanization"].asString(), "never");
+  EXPECT_FALSE(rewritten["showReverseCode"].asBool());
+
+  const auto reloaded = Moqi::TypeDuck::loadPreferences(path);
+  ASSERT_TRUE(reloaded.ok) << reloaded.message;
+  EXPECT_TRUE(reloaded.preferences.asciiMode);
+  EXPECT_EQ(reloaded.preferences.pageSize, 8);
+  EXPECT_EQ(reloaded.preferences.showRomanization, "never");
+  EXPECT_FALSE(reloaded.preferences.showReverseCode);
+}
+
+TEST(TypeDuckPreferences, CorruptJsonStillSavesFromDefaults) {
+  // The merge base has to degrade safely. An unparseable file cannot be merged
+  // onto, but it must not wedge the save either -- if it did, one bad byte would
+  // jam the Shift toggle and the settings dialog forever. The save must still
+  // succeed and self-heal the file back to a valid document.
+  const auto root = makeTempDir("typeduck-corrupt-json-test");
+  const auto path = root / "preferences.json";
+  writeFile(path, "{ this is not json at all ]]");
+
+  const auto loaded = Moqi::TypeDuck::loadPreferences(path);
+  EXPECT_FALSE(loaded.ok);  // the corrupt file is reported...
+  EXPECT_FALSE(loaded.message.empty());
+
+  auto prefs = loaded.preferences;  // ...but usable defaults come back.
+  prefs.asciiMode = true;
+  ASSERT_TRUE(Moqi::TypeDuck::savePreferences(path, prefs).ok);
+  EXPECT_FALSE(std::filesystem::exists(root / "preferences.json.tmp"));
+
+  const auto reloaded = Moqi::TypeDuck::loadPreferences(path);
+  ASSERT_TRUE(reloaded.ok) << reloaded.message;
+  EXPECT_TRUE(reloaded.preferences.asciiMode);
+  EXPECT_EQ(reloaded.preferences.pageSize,
+            Moqi::TypeDuck::defaultPreferences().pageSize);
+
+  // Same guarantee for a file that parses but is not a JSON object: the merge
+  // base must reject it rather than let jsoncpp throw on subscripting an array.
+  writeFile(path, "[1, 2, 3]");
+  auto fromArray = Moqi::TypeDuck::defaultPreferences();
+  fromArray.asciiMode = true;
+  ASSERT_TRUE(Moqi::TypeDuck::savePreferences(path, fromArray).ok);
+
+  const auto afterArray = Moqi::TypeDuck::loadPreferences(path);
+  ASSERT_TRUE(afterArray.ok) << afterArray.message;
+  EXPECT_TRUE(afterArray.preferences.asciiMode);
 }

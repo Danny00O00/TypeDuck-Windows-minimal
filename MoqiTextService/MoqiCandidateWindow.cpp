@@ -1181,6 +1181,21 @@ void CandidateWindow::recalculateSize() {
     }
     candidateRowWidth += navWidth;
 
+    // Defensive: the uniform-cap loop above bounds only the candidate CELLS. preeditWidth is
+    // folded into contentWidth below, so on the external-preedit fallback path (the strip is
+    // empty for inline composition) an extremely long uncommitted code could still size the
+    // panel wider than the monitor. Bound it against the same work area. Truncation is already
+    // handled downstream: paintInputBuffer() draws every preedit segment with DT_END_ELLIPSIS
+    // clipped to preeditRc.right, and paintPreeditCursor() already pins the caret inside the
+    // strip, so a long code ellipsizes rather than overflowing. minWidth_ still wins in the
+    // max() below, so a work area narrower than the minimum cannot collapse the panel.
+    if (workAreaWidth > 0) {
+        const int availablePreeditWidth = workAreaWidth - (padX_ * 2 + borderWidth_ * 2);
+        if (availablePreeditWidth > 0) {
+            preeditWidth = (std::min)(preeditWidth, availablePreeditWidth);
+        }
+    }
+
     const int contentWidth = (std::max)((std::max)(candidateRowWidth, preeditWidth), minWidth_);
     const int candidatePanelWidth = padX_ * 2 + contentWidth + borderWidth_ * 2;
     int candidatePanelHeight = itemHeight_;
