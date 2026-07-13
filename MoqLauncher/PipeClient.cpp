@@ -36,6 +36,18 @@ static constexpr std::uint64_t BACKEND_REQUEST_TIMEOUT_MS = 30 * 1000;
 
 namespace {
 
+// A settings file we could not READ must never be WRITTEN. loadPreferences hands
+// back defaults when the file cannot be opened, and merging an update onto those
+// defaults and saving would erase every setting -- and every key this build does
+// not model -- that the unreadable file still holds. This goes back on the reply
+// that already carries the ok flag and the message; no new protocol field.
+constexpr const char* kPreferencesUnreadableMessage =
+    "設定未能套用：無法讀取現有設定檔，為免覆寫檔案內未能讀取的設定，本次更新沒有寫入。"
+    "請關閉可能正在佔用該檔案的程式，然後再試一次。 / "
+    "Settings could not be applied: the existing settings file could not be read, "
+    "so the update was not written over it. Close any program that may be locking "
+    "the file and try again.";
+
 void fillTypeDuckSettingsSnapshot(
     moqi::protocol::TypeDuckSettingsSnapshot* snapshot,
     const TypeDuck::Preferences& preferences,
@@ -343,6 +355,16 @@ bool PipeClient::handleTypeDuckSettingsRequest(
                 request,
                 false,
                 "設定更新內容無效 / Settings update payload is invalid");
+            return true;
+        }
+        if (TypeDuck::preferencesBlockWrites(loaded)) {
+            // The file exists (or we cannot even tell) and could not be read, so
+            // `preferences` here is a set of defaults nobody read off the disk.
+            // Merging the update onto them and saving would destroy the settings
+            // still in the file. Refuse the save and report it as a failure --
+            // the settings app surfaces this message to the user.
+            writeTypeDuckSettingsResponse(
+                request, false, kPreferencesUnreadableMessage);
             return true;
         }
         preferences = applyUpdateToPreferences(

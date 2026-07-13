@@ -392,7 +392,10 @@ TEST(TypeDuckPreferences, UnreadableFileIsReportedUnreadableNotAsACleanDefaultLo
   }
   if (!deniedIsStillOpenable) {
     const auto loaded = Moqi::TypeDuck::loadPreferences(denied);
-    EXPECT_EQ(loaded.source, Moqi::TypeDuck::PreferencesSource::Unreadable);
+    // The bytes are there and we cannot see them: IoError, never Corrupt.
+    EXPECT_EQ(loaded.source, Moqi::TypeDuck::PreferencesSource::IoError);
+    EXPECT_TRUE(Moqi::TypeDuck::preferencesBlockWrites(loaded));
+    EXPECT_FALSE(Moqi::TypeDuck::preferencesAreAuthoritative(loaded));
     EXPECT_FALSE(Moqi::TypeDuck::preferencesWereReadFromFile(loaded));
     EXPECT_FALSE(loaded.ok);
     EXPECT_FALSE(loaded.message.empty());
@@ -412,16 +415,22 @@ TEST(TypeDuckPreferences, UnreadableFileIsReportedUnreadableNotAsACleanDefaultLo
   const auto directoryPath = root / "directory.json";
   std::filesystem::create_directories(directoryPath);
   const auto loadedDirectory = Moqi::TypeDuck::loadPreferences(directoryPath);
-  EXPECT_EQ(loadedDirectory.source, Moqi::TypeDuck::PreferencesSource::Unreadable);
+  EXPECT_EQ(loadedDirectory.source, Moqi::TypeDuck::PreferencesSource::IoError);
+  EXPECT_TRUE(Moqi::TypeDuck::preferencesBlockWrites(loadedDirectory));
   EXPECT_FALSE(Moqi::TypeDuck::preferencesWereReadFromFile(loadedDirectory));
   EXPECT_FALSE(loadedDirectory.ok);
   EXPECT_FALSE(loadedDirectory.message.empty());
 
-  // And a file that opens but is not JSON at all: unparseable is unreadable too.
+  // And a file that opens but is not JSON at all. This one is CORRUPT, not
+  // IoError: the bytes were read, there is simply nothing parseable in them. The
+  // difference is not cosmetic -- it is what decides whether the file may be
+  // rewritten. Nothing can be lost by self-healing this one.
   const auto garbage = root / "garbage.json";
   writeFile(garbage, std::string("\x01\x02 not json {{{", 15));
   const auto loadedGarbage = Moqi::TypeDuck::loadPreferences(garbage);
-  EXPECT_EQ(loadedGarbage.source, Moqi::TypeDuck::PreferencesSource::Unreadable);
+  EXPECT_EQ(loadedGarbage.source, Moqi::TypeDuck::PreferencesSource::Corrupt);
+  EXPECT_FALSE(Moqi::TypeDuck::preferencesBlockWrites(loadedGarbage));
+  EXPECT_FALSE(Moqi::TypeDuck::preferencesAreAuthoritative(loadedGarbage));
   EXPECT_FALSE(Moqi::TypeDuck::preferencesWereReadFromFile(loadedGarbage));
   EXPECT_FALSE(loadedGarbage.ok);
 
@@ -433,6 +442,8 @@ TEST(TypeDuckPreferences, UnreadableFileIsReportedUnreadableNotAsACleanDefaultLo
   const auto loadedGood = Moqi::TypeDuck::loadPreferences(good);
   EXPECT_EQ(loadedGood.source, Moqi::TypeDuck::PreferencesSource::File);
   EXPECT_TRUE(Moqi::TypeDuck::preferencesWereReadFromFile(loadedGood));
+  EXPECT_TRUE(Moqi::TypeDuck::preferencesAreAuthoritative(loadedGood));
+  EXPECT_FALSE(Moqi::TypeDuck::preferencesBlockWrites(loadedGood));
   EXPECT_TRUE(loadedGood.ok);
   EXPECT_TRUE(loadedGood.preferences.asciiMode);
 }
@@ -451,7 +462,11 @@ TEST(TypeDuckPreferences, PathologicallyNestedJsonDegradesInsteadOfThrowing) {
 
   Moqi::TypeDuck::ValidationResult loaded;
   ASSERT_NO_THROW(loaded = Moqi::TypeDuck::loadPreferences(path));
-  EXPECT_EQ(loaded.source, Moqi::TypeDuck::PreferencesSource::Unreadable);
+  // The bytes came off the disk fine; it is the PARSE that blew up. That is
+  // Corrupt, not IoError -- there is nothing parseable in the file to lose, so
+  // the save below is still allowed to self-heal it.
+  EXPECT_EQ(loaded.source, Moqi::TypeDuck::PreferencesSource::Corrupt);
+  EXPECT_FALSE(Moqi::TypeDuck::preferencesBlockWrites(loaded));
   EXPECT_FALSE(Moqi::TypeDuck::preferencesWereReadFromFile(loaded));
   EXPECT_FALSE(loaded.ok);
   EXPECT_FALSE(loaded.message.empty());
@@ -484,11 +499,16 @@ TEST(TypeDuckPreferences, AbsentFileStaysTheQuietFirstRunDefaultPath) {
   EXPECT_TRUE(loaded.ok);
   EXPECT_TRUE(loaded.message.empty());
   EXPECT_EQ(loaded.source, Moqi::TypeDuck::PreferencesSource::Absent);
-  EXPECT_NE(loaded.source, Moqi::TypeDuck::PreferencesSource::Unreadable);
+  EXPECT_NE(loaded.source, Moqi::TypeDuck::PreferencesSource::IoError);
+  EXPECT_NE(loaded.source, Moqi::TypeDuck::PreferencesSource::Corrupt);
   // Absent means "defaults ARE the state on disk", but they still were not read
   // out of a file, and callers that need proof of the stored value must not get
   // it here.
   EXPECT_FALSE(Moqi::TypeDuck::preferencesWereReadFromFile(loaded));
+  // It IS authoritative, though -- there is no file, so the defaults really are
+  // the stored state. And an absent file blocks nothing: first run must write.
+  EXPECT_TRUE(Moqi::TypeDuck::preferencesAreAuthoritative(loaded));
+  EXPECT_FALSE(Moqi::TypeDuck::preferencesBlockWrites(loaded));
 
   const auto defaults = Moqi::TypeDuck::defaultPreferences();
   EXPECT_EQ(loaded.preferences.displayLanguages, defaults.displayLanguages);
@@ -504,4 +524,212 @@ TEST(TypeDuckPreferences, AbsentFileStaysTheQuietFirstRunDefaultPath) {
   EXPECT_TRUE(missing.message.empty());
   EXPECT_EQ(missing.source, Moqi::TypeDuck::PreferencesSource::Absent);
   EXPECT_FALSE(Moqi::TypeDuck::preferencesWereReadFromFile(missing));
+}
+
+TEST(TypeDuckPreferences, SourcePredicatesSplitReadFailureFromCorruption) {
+  // The contract every writer codes against. Authoritative == "these values are
+  // really what is on disk" (File, and Absent because no file means the defaults
+  // ARE the state). BlockWrites == IoError and NOTHING else: a file we could not
+  // read must never be written over, while a corrupt file has nothing parseable
+  // in it to lose and is deliberately left writable so the save can self-heal it.
+  const auto sourceOf = [](Moqi::TypeDuck::PreferencesSource source) {
+    Moqi::TypeDuck::ValidationResult result;
+    result.source = source;
+    return result;
+  };
+  using Source = Moqi::TypeDuck::PreferencesSource;
+
+  EXPECT_TRUE(Moqi::TypeDuck::preferencesAreAuthoritative(sourceOf(Source::File)));
+  EXPECT_TRUE(Moqi::TypeDuck::preferencesAreAuthoritative(sourceOf(Source::Absent)));
+  EXPECT_FALSE(Moqi::TypeDuck::preferencesAreAuthoritative(sourceOf(Source::IoError)));
+  EXPECT_FALSE(Moqi::TypeDuck::preferencesAreAuthoritative(sourceOf(Source::Corrupt)));
+  EXPECT_FALSE(Moqi::TypeDuck::preferencesAreAuthoritative(sourceOf(Source::NotLoaded)));
+
+  EXPECT_TRUE(Moqi::TypeDuck::preferencesBlockWrites(sourceOf(Source::IoError)));
+  EXPECT_FALSE(Moqi::TypeDuck::preferencesBlockWrites(sourceOf(Source::Corrupt)));
+  EXPECT_FALSE(Moqi::TypeDuck::preferencesBlockWrites(sourceOf(Source::File)));
+  EXPECT_FALSE(Moqi::TypeDuck::preferencesBlockWrites(sourceOf(Source::Absent)));
+  EXPECT_FALSE(Moqi::TypeDuck::preferencesBlockWrites(sourceOf(Source::NotLoaded)));
+
+  // The default-constructed result never claims to know anything about the disk.
+  EXPECT_EQ(Moqi::TypeDuck::ValidationResult{}.source, Source::NotLoaded);
+}
+
+TEST(TypeDuckPreferences, UnreadableFileIsNeverOverwrittenBySave) {
+  // THE REGRESSION THIS FIXES. A settings file we could not READ must never be
+  // WRITTEN. savePreferences builds its merge base by re-reading the file, so if
+  // an unreadable base were allowed through, the merge would happen onto an EMPTY
+  // object and the rename would drop that over the user's file -- rewriting it
+  // from defaults and destroying every other setting and every unknown key in it.
+  // The Shift toggle calls savePreferences on every press, so this lands on one
+  // keystroke. The save must fail, and the bytes on disk must be untouched.
+  const auto root = makeTempDir("typeduck-unreadable-save-test");
+
+  // Half 1 -- deterministic on BOTH platforms: a directory where the file belongs.
+  // POSIX opens a directory as a file and fails the read; Windows refuses to open
+  // it at all. Either way it is IoError, and the save must decline. The sentinel
+  // inside proves nothing was clobbered, since replacing the path would take the
+  // whole directory (and the sentinel) with it.
+  const auto directoryPath = root / "directory.json";
+  std::filesystem::create_directories(directoryPath);
+  writeFile(directoryPath / "sentinel.txt", "do-not-destroy-me");
+
+  const auto loadedDirectory = Moqi::TypeDuck::loadPreferences(directoryPath);
+  EXPECT_EQ(loadedDirectory.source, Moqi::TypeDuck::PreferencesSource::IoError);
+  EXPECT_TRUE(Moqi::TypeDuck::preferencesBlockWrites(loadedDirectory));
+
+  auto toggled = Moqi::TypeDuck::defaultPreferences();
+  toggled.asciiMode = true;  // exactly what one Shift press tries to persist
+  const auto savedOverDirectory =
+      Moqi::TypeDuck::savePreferences(directoryPath, toggled);
+  EXPECT_FALSE(savedOverDirectory.ok);
+  EXPECT_FALSE(savedOverDirectory.message.empty());
+  EXPECT_NE(savedOverDirectory.message.find("設定"), std::string::npos);
+  EXPECT_NE(savedOverDirectory.message.find("Settings"), std::string::npos);
+  EXPECT_TRUE(std::filesystem::is_directory(directoryPath));
+  EXPECT_EQ(readFile(directoryPath / "sentinel.txt"), "do-not-destroy-me");
+  // Refusing means touching NOTHING: no temp file may be left lying around.
+  EXPECT_FALSE(std::filesystem::exists(root / "directory.json.tmp"));
+
+  // Half 2 -- the real-world shape of the bug, and the half that actually proves
+  // the user's bytes survive: an unreadable FILE inside a still-WRITABLE
+  // directory (an ACL on the file alone, an antivirus lock). Here the rename in
+  // savePreferences would genuinely succeed, so nothing but the IoError check
+  // stands between the user and a settings file rewritten from defaults.
+  //
+  // Gated on an actual probe, not on an assumption: POSIX honours chmod 000, but
+  // MSVC's std::filesystem does not model it and root ignores it entirely. Where
+  // the file stays readable there is no read failure to test, so we skip.
+  const auto denied = root / "denied.json";
+  const std::string original =
+      "{\n  \"pageSize\": 9,\n  \"asciiMode\": false,\n"
+      "  \"futureScalarSetting\": \"keep-me\"\n}";
+  writeFile(denied, original);
+  std::error_code ec;
+  std::filesystem::permissions(denied, std::filesystem::perms::none,
+                               std::filesystem::perm_options::replace, ec);
+  bool deniedIsStillOpenable = true;
+  {
+    std::ifstream probe(denied, std::ios::binary);
+    deniedIsStillOpenable = probe.is_open();
+  }
+
+  if (!deniedIsStillOpenable) {
+    // The directory is untouched, so a write here WOULD land. Only the contract
+    // stops it.
+    EXPECT_TRUE(std::filesystem::exists(root));
+
+    const auto loadedDenied = Moqi::TypeDuck::loadPreferences(denied);
+    EXPECT_EQ(loadedDenied.source, Moqi::TypeDuck::PreferencesSource::IoError);
+    EXPECT_TRUE(Moqi::TypeDuck::preferencesBlockWrites(loadedDenied));
+    EXPECT_FALSE(Moqi::TypeDuck::preferencesAreAuthoritative(loadedDenied));
+
+    const auto savedOverDenied = Moqi::TypeDuck::savePreferences(denied, toggled);
+    EXPECT_FALSE(savedOverDenied.ok);
+    EXPECT_FALSE(savedOverDenied.message.empty());
+    EXPECT_NE(savedOverDenied.message.find("設定"), std::string::npos);
+    EXPECT_NE(savedOverDenied.message.find("Settings"), std::string::npos);
+    EXPECT_FALSE(std::filesystem::exists(root / "denied.json.tmp"));
+
+    // Give the read permission back and look: the ORIGINAL BYTES are still there,
+    // pageSize 9 and the unmodelled key included. Before the fix this file came
+    // back as a defaults document with pageSize 6 and futureScalarSetting gone.
+    std::filesystem::permissions(denied, std::filesystem::perms::owner_all,
+                                 std::filesystem::perm_options::replace, ec);
+    EXPECT_EQ(readFile(denied), original);
+
+    const auto reloaded = Moqi::TypeDuck::loadPreferences(denied);
+    EXPECT_EQ(reloaded.source, Moqi::TypeDuck::PreferencesSource::File);
+    EXPECT_EQ(reloaded.preferences.pageSize, 9);
+    EXPECT_FALSE(reloaded.preferences.asciiMode);
+  }
+  // Always restore, so the next run's remove_all() can clean up.
+  std::filesystem::permissions(denied, std::filesystem::perms::owner_all,
+                               std::filesystem::perm_options::replace, ec);
+}
+
+TEST(TypeDuckPreferences, AbsentFileMatchingTheDefaultIsNotCreated) {
+  // First run, engine echoes its default mode (Chinese). The stored state and the
+  // new value already agree -- Absent means the defaults ARE what is on disk -- so
+  // persistTypeDuckAsciiMode() must take its no-op early-out and create NOTHING.
+  // Writing here is pure downside: on a machine where the directory is not
+  // writable it burns every retry and warns the user about a change they never
+  // made. This asserts the exact condition that guards that early-out.
+  const auto root = makeTempDir("typeduck-absent-noop-test");
+  const auto path = root / "preferences.json";
+  ASSERT_FALSE(std::filesystem::exists(path));
+
+  // What the backend echoes on a fresh install: asciiMode == the default, false.
+  const bool asciiModeFromEngine = Moqi::TypeDuck::defaultPreferences().asciiMode;
+
+  const auto loaded = Moqi::TypeDuck::loadPreferences(path);
+  ASSERT_EQ(loaded.source, Moqi::TypeDuck::PreferencesSource::Absent);
+
+  // persistTypeDuckAsciiMode()'s early-out, verbatim. It must fire.
+  EXPECT_TRUE(Moqi::TypeDuck::preferencesAreAuthoritative(loaded) &&
+              loaded.preferences.asciiMode == asciiModeFromEngine);
+
+  // Reading must not have created the file, and because the early-out fires no
+  // save runs -- so nothing exists on disk afterwards, not even a temp file.
+  EXPECT_FALSE(std::filesystem::exists(path));
+  EXPECT_FALSE(std::filesystem::exists(root / "preferences.json.tmp"));
+  EXPECT_TRUE(std::filesystem::is_empty(root));
+
+  // The other half of the same branch: the first Shift press to the NON-default
+  // mode does differ from the stored state, so the early-out must NOT fire and
+  // the file must be created.
+  const bool toggledMode = !asciiModeFromEngine;
+  EXPECT_FALSE(Moqi::TypeDuck::preferencesAreAuthoritative(loaded) &&
+               loaded.preferences.asciiMode == toggledMode);
+  EXPECT_FALSE(Moqi::TypeDuck::preferencesBlockWrites(loaded));
+
+  auto prefs = loaded.preferences;
+  prefs.asciiMode = toggledMode;
+  ASSERT_TRUE(Moqi::TypeDuck::savePreferences(path, prefs).ok);
+  EXPECT_TRUE(std::filesystem::exists(path));
+  EXPECT_FALSE(std::filesystem::exists(root / "preferences.json.tmp"));
+
+  const auto reloaded = Moqi::TypeDuck::loadPreferences(path);
+  EXPECT_EQ(reloaded.source, Moqi::TypeDuck::PreferencesSource::File);
+  EXPECT_EQ(reloaded.preferences.asciiMode, toggledMode);
+}
+
+TEST(TypeDuckPreferences, CorruptFileIsReportedCorruptAndStaysWritable) {
+  // The counterpart to UnreadableFileIsNeverOverwrittenBySave, and the reason the
+  // enum has to be SPLIT rather than just "unreadable": a file whose bytes we did
+  // read and which contains nothing parseable has nothing to lose. Blocking the
+  // write here would wedge the Shift toggle and the settings dialog forever on a
+  // single bad byte. It must self-heal instead.
+  const auto root = makeTempDir("typeduck-corrupt-writable-test");
+  const auto path = root / "preferences.json";
+  writeFile(path, "{ this is not json at all ]]");
+
+  const auto loaded = Moqi::TypeDuck::loadPreferences(path);
+  EXPECT_EQ(loaded.source, Moqi::TypeDuck::PreferencesSource::Corrupt);
+  EXPECT_FALSE(loaded.ok);
+  EXPECT_FALSE(Moqi::TypeDuck::preferencesAreAuthoritative(loaded));
+  // The load says "do not trust these values" but NOT "do not write": corruption
+  // must never be mistaken for an I/O failure.
+  EXPECT_FALSE(Moqi::TypeDuck::preferencesBlockWrites(loaded));
+
+  auto prefs = loaded.preferences;
+  prefs.asciiMode = true;
+  const auto saved = Moqi::TypeDuck::savePreferences(path, prefs);
+  ASSERT_TRUE(saved.ok) << saved.message;
+  EXPECT_FALSE(std::filesystem::exists(root / "preferences.json.tmp"));
+
+  const auto reloaded = Moqi::TypeDuck::loadPreferences(path);
+  EXPECT_EQ(reloaded.source, Moqi::TypeDuck::PreferencesSource::File);
+  EXPECT_TRUE(reloaded.ok);
+  EXPECT_TRUE(reloaded.preferences.asciiMode);
+
+  // An empty file is corrupt in the same way -- read fine, nothing parseable in
+  // it -- and must likewise self-heal rather than jam the toggle.
+  writeFile(path, "");
+  const auto loadedEmpty = Moqi::TypeDuck::loadPreferences(path);
+  EXPECT_EQ(loadedEmpty.source, Moqi::TypeDuck::PreferencesSource::Corrupt);
+  EXPECT_FALSE(Moqi::TypeDuck::preferencesBlockWrites(loadedEmpty));
+  ASSERT_TRUE(Moqi::TypeDuck::savePreferences(path, prefs).ok);
+  EXPECT_EQ(Moqi::TypeDuck::loadPreferences(path).source,
+            Moqi::TypeDuck::PreferencesSource::File);
 }

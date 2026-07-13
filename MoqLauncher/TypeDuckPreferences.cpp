@@ -6,6 +6,8 @@
 #include <fstream>
 #include <iterator>
 #include <set>
+#include <sstream>
+#include <string>
 
 #include <json/json.h>
 
@@ -26,6 +28,12 @@ constexpr const char* kInvalidFileMessage =
     "設定檔無效，已使用預設值 / Settings file is invalid; defaults were loaded";
 constexpr const char* kUnreadableFileMessage =
     "設定檔未能讀取，已使用預設值 / Settings file could not be read; defaults were loaded";
+// Refusing to save is the SUCCESSFUL outcome of the rule "never write over a file
+// we could not read": the user keeps every setting in the unread file and loses
+// only this one change, instead of keeping this one change and losing the file.
+constexpr const char* kUnreadableSaveMessage =
+    "設定檔未能讀取，為免覆蓋原有設定，今次變更未有儲存 / Settings file could not be "
+    "read; this change was not saved so that the existing settings are not overwritten";
 
 const std::vector<std::string>& languageOrder() {
   static const std::vector<std::string> languages{"eng", "hin", "ind", "nep", "urd"};
@@ -41,28 +49,98 @@ bool isKnownRomanizationMode(const std::string& value) {
   return value == "always" || value == "reverse_only" || value == "never";
 }
 
-// Loads the raw JSON document currently on disk, to be used as a merge base by
-// preferencesToJson. A missing, unreadable, unparseable, or non-object file
-// degrades to an empty object rather than propagating a failure: savePreferences
-// must never be wedged by a corrupt file, or a single bad byte would jam both
-// the Shift toggle and the settings dialog forever. Never throws — jsoncpp
-// raises Json::Exception (e.g. on a document nested past its stack limit), so
-// the parse is guarded.
-Json::Value existingPreferencesJson(const std::filesystem::path& path) {
+struct PreferencesDocument {
+  PreferencesSource source = PreferencesSource::IoError;
+  // The document on disk when source == File; an empty object otherwise. Callers
+  // merge onto it, so it is always a valid object and never needs a null check.
+  Json::Value root{Json::objectValue};
+};
+
+// THE single place that decides what is on disk. loadPreferences and
+// savePreferences both go through it, so the read that decides "may I write?"
+// and the read that builds the merge base can never disagree -- if they could,
+// save would happily rewrite from an empty base a file that load had just
+// declared unreadable, which is exactly the bug this function exists to kill.
+//
+// Never throws: jsoncpp raises Json::Exception (e.g. on a document nested past
+// its reader stack limit) and this runs on the launcher's libuv loop thread.
+// An exception AFTER the bytes are in hand is a parse failure -> Corrupt; one
+// before is a read failure -> IoError, the verdict that forbids writing.
+PreferencesDocument readPreferencesDocument(const std::filesystem::path& path) {
+  bool bytesWereRead = false;
   try {
+    // Ask what is actually there BEFORE opening. "Missing" and "there but denied"
+    // both fail to open and mean opposite things; and a DIRECTORY sitting where
+    // the file belongs opens happily on POSIX (the read then fails) while Windows
+    // refuses outright, so stat-ing first is what makes the verdict identical on
+    // both platforms instead of a coin toss decided by the C library.
+    // Key off the returned file_type, NOT off the error_code. libc++ reports a
+    // plain missing file by setting ec to ENOENT *and* returning not_found, so
+    // treating a non-empty ec as "cannot tell" would misfile every first run as
+    // IoError -- which then refuses to create the file at all. file_type is the
+    // channel the standard defines for exactly this question: not_found means the
+    // file genuinely is not there, none means the status could not be determined.
+    std::error_code ec;
+    const auto status = std::filesystem::status(path, ec);
+    if (status.type() == std::filesystem::file_type::not_found) {
+      // First run, or a path under a directory that does not exist yet.
+      return {PreferencesSource::Absent, Json::Value(Json::objectValue)};
+    }
+    if (status.type() == std::filesystem::file_type::none) {
+      // We cannot even tell what is there (a denied parent directory, say).
+      // "Unknown" must never be optimistically treated as "nothing".
+      return {PreferencesSource::IoError, Json::Value(Json::objectValue)};
+    }
+    if (!std::filesystem::is_regular_file(status)) {
+      // A directory (or a device, or a socket) sitting where the file belongs.
+      return {PreferencesSource::IoError, Json::Value(Json::objectValue)};
+    }
+
+    std::error_code sizeEc;
+    const auto expectedSize = std::filesystem::file_size(path, sizeEc);
+
     std::ifstream stream(path, std::ios::binary);
     if (!stream.is_open()) {
-      return Json::Value(Json::objectValue);
+      return {PreferencesSource::IoError, Json::Value(Json::objectValue)};
     }
+    std::ostringstream buffer;
+    buffer << stream.rdbuf();
+    const std::string contents = buffer.str();
+    // Count the bytes; do not ask the source stream how it went. Inserting a
+    // streambuf sets failbit/badbit on the DESTINATION, never on the ifstream,
+    // and filebuf::underflow() reports a failed read() as plain eof -- so a
+    // short read looks exactly like a clean end of file. A file on a dropped
+    // network share (APPDATA is routinely redirected) therefore hands back
+    // truncated bytes that fail to parse, and "unparseable" is a writable
+    // verdict. Trusting the stream state here would rewrite a file we never
+    // actually read.
+    if (sizeEc || contents.size() != static_cast<std::size_t>(expectedSize)) {
+      return {PreferencesSource::IoError, Json::Value(Json::objectValue)};
+    }
+    bytesWereRead = true;
+
+    // Parse from the bytes we already hold, using the same CharReaderBuilder +
+    // parseFromStream pair this file has always used -- the point of reading the
+    // file ourselves is only to learn WHETHER the bytes arrived, which a parse
+    // straight off the ifstream cannot tell us (it reports "not JSON" for a read
+    // error and a garbage file alike, and those two need opposite verdicts).
+    std::istringstream contentStream(contents);
     Json::CharReaderBuilder builder;
     Json::Value root;
     std::string errors;
-    if (!Json::parseFromStream(builder, stream, &root, &errors) || !root.isObject()) {
-      return Json::Value(Json::objectValue);
+    if (!Json::parseFromStream(builder, contentStream, &root, &errors) ||
+        !root.isObject()) {
+      // Read fine, unparseable (or a JSON array/scalar, which cannot be merged
+      // onto). There is nothing in there to lose, so a rewrite may self-heal it.
+      return {PreferencesSource::Corrupt, Json::Value(Json::objectValue)};
     }
-    return root;
+    return {PreferencesSource::File, root};
   } catch (const std::exception&) {
-    return Json::Value(Json::objectValue);
+    return {bytesWereRead ? PreferencesSource::Corrupt : PreferencesSource::IoError,
+            Json::Value(Json::objectValue)};
+  } catch (...) {
+    return {bytesWereRead ? PreferencesSource::Corrupt : PreferencesSource::IoError,
+            Json::Value(Json::objectValue)};
   }
 }
 
@@ -331,54 +409,59 @@ bool preferencesWereReadFromFile(const ValidationResult& result) {
   return result.source == PreferencesSource::File;
 }
 
+bool preferencesAreAuthoritative(const ValidationResult& result) {
+  // Absent counts: no file means the defaults we handed back really are the state
+  // on disk. IoError and Corrupt do not: those preferences were invented.
+  return result.source == PreferencesSource::File ||
+         result.source == PreferencesSource::Absent;
+}
+
+bool preferencesBlockWrites(const ValidationResult& result) {
+  // IoError ONLY. Corrupt is deliberately writable (self-heal), and NotLoaded is
+  // not a statement about the disk at all -- it never came from a load.
+  return result.source == PreferencesSource::IoError;
+}
+
 // Never throws; see the contract on the declaration. Failures do not just have
 // to be survivable, they have to be HONEST: a result that carries defaults must
 // say so, because a caller comparing the loaded value with the value it is about
 // to write cannot otherwise tell a stored false from an invented one.
 ValidationResult loadPreferences(const std::filesystem::path& path) {
   try {
-    std::ifstream stream(path, std::ios::binary);
-    if (!stream.is_open()) {
-      // "Not there" and "there but denied" both fail to open, and they mean
-      // opposite things: absent means defaults ARE the state on disk (first
-      // run), denied means the state on disk is unknown and must not be guessed.
-      // If exists() itself fails (a denied parent directory, for instance) we do
-      // not know either -- and "unknown" is the answer that makes callers save,
-      // retry and warn instead of assuming.
-      std::error_code ec;
-      const bool present = std::filesystem::exists(path, ec);
-      if (!present && !ec) {
-        return {true, defaultPreferences(), "", PreferencesSource::Absent};
+    const auto document = readPreferencesDocument(path);
+    switch (document.source) {
+    case PreferencesSource::File: {
+      auto result = validatePreferences(preferencesFromJson(document.root));
+      // The bytes really came off the disk, even if some of the values in them
+      // were out of range and got normalized away.
+      result.source = PreferencesSource::File;
+      if (!result.ok && result.message.empty()) {
+        result.message = kInvalidFileMessage;
       }
-      return {false, defaultPreferences(), kUnreadableFileMessage,
-              PreferencesSource::Unreadable};
+      return result;
     }
-
-    Json::CharReaderBuilder builder;
-    Json::Value root;
-    std::string errors;
-    if (!Json::parseFromStream(builder, stream, &root, &errors) || !root.isObject()) {
+    case PreferencesSource::Absent:
+      // Not an error. First run: the defaults ARE what is on disk.
+      return {true, defaultPreferences(), "", PreferencesSource::Absent};
+    case PreferencesSource::Corrupt:
       return {false, defaultPreferences(), kInvalidFileMessage,
-              PreferencesSource::Unreadable};
+              PreferencesSource::Corrupt};
+    case PreferencesSource::IoError:
+    case PreferencesSource::NotLoaded:
+      break;
     }
-    auto result = validatePreferences(preferencesFromJson(root));
-    // The bytes really came off the disk, even if some of the values in them
-    // were out of range and got normalized away.
-    result.source = PreferencesSource::File;
-    if (!result.ok && result.message.empty()) {
-      result.message = kInvalidFileMessage;
-    }
-    return result;
-  } catch (const std::exception&) {
-    // jsoncpp raises Json::Exception (a std::exception) when a document nests
-    // past its stack limit -- roughly 1,000 levels, which a corrupt or hostile
-    // file reaches trivially. This runs on the libuv loop thread ahead of reply
-    // forwarding, so it degrades to defaults instead of unwinding through it.
     return {false, defaultPreferences(), kUnreadableFileMessage,
-            PreferencesSource::Unreadable};
+            PreferencesSource::IoError};
   } catch (...) {
+    // Backstop only -- readPreferencesDocument already absorbs the parse
+    // exceptions (jsoncpp throws Json::Exception on a document nested past its
+    // reader stack limit, which a hostile file reaches in a few kilobytes). What
+    // is left is the likes of bad_alloc, and this runs on the libuv loop thread
+    // ahead of reply forwarding, so it degrades instead of unwinding through it.
+    // IoError, not Corrupt, is the conservative verdict: we no longer have a
+    // trustworthy picture of the file, so nobody may overwrite it.
     return {false, defaultPreferences(), kUnreadableFileMessage,
-            PreferencesSource::Unreadable};
+            PreferencesSource::IoError};
   }
 }
 
@@ -391,6 +474,23 @@ SaveResult savePreferences(const std::filesystem::path& path,
     if (!result.ok) {
       return {false, result.message};
     }
+
+    // Read the merge base FIRST -- before creating a directory, before opening a
+    // temp file, before touching anything at all.
+    //
+    // If the file is there but unreadable, this is where we STOP. Falling through
+    // would merge the new value onto an EMPTY base and rename that over the file,
+    // rewriting the user's settings from defaults and destroying every key the
+    // unread file was holding. The Shift toggle calls this on every press, so
+    // that would land on a single keystroke. Losing this one change is the
+    // acceptable outcome; losing the file is not.
+    const auto base = readPreferencesDocument(path);
+    if (base.source == PreferencesSource::IoError) {
+      return {false, kUnreadableSaveMessage};
+    }
+    // Absent (first run) and Corrupt (nothing parseable in there to lose) both
+    // carry an empty object and write normally -- the Corrupt case self-heals.
+
     std::error_code ec;
     std::filesystem::create_directories(path.parent_path(), ec);
     if (ec) {
@@ -402,7 +502,7 @@ SaveResult savePreferences(const std::filesystem::path& path,
     // Merge onto whatever is already on disk (read before the temp file is opened)
     // so keys this build does not model are preserved rather than erased.
     const Json::Value document =
-        preferencesToJson(result.preferences, existingPreferencesJson(path));
+        preferencesToJson(result.preferences, base.root);
     // Write to a sibling temp file and rename over the target so a crash or a
     // full disk mid-write can never leave a truncated preferences file behind.
     const auto tempPath =

@@ -228,6 +228,22 @@ void BackendServer::persistTypeDuckAsciiMode(bool asciiMode) {
   try {
     const auto path = TypeDuck::defaultPreferencesPath();
 
+    // Every attempt failed: the user's Chinese/English mode will silently revert
+    // on the next restart, so say so once. enqueueTrayNotification() only takes a
+    // mutex and PostMessage()s, so it does not block this loop thread. The latch
+    // keeps a locked file from spamming the tray on every Shift press.
+    const auto warnOnce = [this]() {
+      if (asciiPersistFailureNotified_) {
+        return;
+      }
+      asciiPersistFailureNotified_ = true;
+      pipeServer_->enqueueTrayNotification(
+          L"TypeDuck",
+          L"中英模式未能儲存，重新啟動後會回復原本設定 / Could not save the "
+          L"Chinese/English input mode; it will revert after a restart",
+          NIIF_WARNING);
+    };
+
     // Bounded, immediate retries; see kAsciiModePersistAttempts. Persistence is
     // best-effort and must NEVER block or fail the reply-forwarding path: this
     // function returns void, cannot throw, and the caller forwards the backend
@@ -238,17 +254,42 @@ void BackendServer::persistTypeDuckAsciiMode(bool asciiMode) {
       // there beats merging it onto invented defaults.
       auto loaded = TypeDuck::loadPreferences(path);
 
-      // ONLY a value read back out of the file proves the mode is already
-      // stored. A failed read hands back DEFAULTS, and skipping the save on
-      // those is how the state used to get lost: disk holds true, the file goes
-      // unreadable, the user toggles to false, the default false "matches", we
-      // return believing it is saved -- and the next restart hands the user back
-      // true, the exact opposite of what they asked for, with no save, no retry
-      // and no warning. An unreadable file must fall through to the save below.
-      if (TypeDuck::preferencesWereReadFromFile(loaded) &&
+      // Nothing to do: the stored state already says what the engine just told
+      // us. AUTHORITATIVE means File or Absent -- a real value parsed out of the
+      // file, or no file at all, in which case the defaults ARE what is on disk.
+      // Absent belongs here: on a fresh install the engine's first echo is the
+      // default (Chinese), and creating the JSON just to write the value it
+      // already implies is pure downside -- if the directory is not writable we
+      // would burn every retry and warn the user about a change they never made.
+      // A failed read is NOT authoritative and must never take this early-out: it
+      // hands back DEFAULTS, and defaults are indistinguishable from stored
+      // values, so a locked file holding true would "match" a toggle to false and
+      // silently revert on the next restart.
+      if (TypeDuck::preferencesAreAuthoritative(loaded) &&
           loaded.preferences.asciiMode == asciiMode) {
         return;
       }
+
+      // The file is there and we could NOT read it. Retry the READ -- never the
+      // write. Writing here would merge the new mode onto invented defaults and
+      // rename that over a file whose real contents we never saw, destroying
+      // every other setting in it. savePreferences() refuses this anyway; the
+      // point of stopping here is to not even ask, and to spend the remaining
+      // attempts on the only thing that can still succeed: reading. The retries
+      // are immediate (no sleep, no backoff) because this is the libuv loop
+      // thread that forwards backend replies to every client.
+      if (TypeDuck::preferencesBlockWrites(loaded)) {
+        // Logs record only the backend name and the attempt counter - never any
+        // typed content.
+        logger()->warn(
+            "Could not read TypeDuck preferences for backend {}; not overwriting "
+            "them (read attempt {}/{})",
+            name_, attempt, kAsciiModePersistAttempts);
+        continue;
+      }
+
+      // File (value differs), Absent (first run, value differs from the default)
+      // or Corrupt (nothing parseable in there to lose): safe to write.
       loaded.preferences.asciiMode = asciiMode;
 
       const auto saved = TypeDuck::savePreferences(path, loaded.preferences);
@@ -257,24 +298,14 @@ void BackendServer::persistTypeDuckAsciiMode(bool asciiMode) {
         asciiPersistFailureNotified_ = false;
         return;
       }
-      // Logs record only the backend name and the attempt counter - never any
-      // typed content.
       logger()->warn(
           "Failed to persist TypeDuck ascii mode for backend {} (attempt {}/{})",
           name_, attempt, kAsciiModePersistAttempts);
     }
 
-    // Every attempt failed: the user's Chinese/English mode will silently revert
-    // on the next restart, so say so once. enqueueTrayNotification() only takes a
-    // mutex and PostMessage()s, so it does not block this loop thread.
-    if (!asciiPersistFailureNotified_) {
-      asciiPersistFailureNotified_ = true;
-      pipeServer_->enqueueTrayNotification(
-          L"TypeDuck",
-          L"中英模式未能儲存，重新啟動後會回復原本設定 / Could not save the "
-          L"Chinese/English input mode; it will revert after a restart",
-          NIIF_WARNING);
-    }
+    // Either every write failed, or every read did (in which case we deliberately
+    // never wrote). Both mean the mode is not on disk and will revert on restart.
+    warnOnce();
   } catch (...) {
     // Swallowed on purpose: the caller must go on forwarding backend replies.
     // Nothing is logged here - the logger is one of the few things that could

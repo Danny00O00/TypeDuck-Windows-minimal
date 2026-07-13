@@ -110,7 +110,9 @@ private:
 	// One-shot latch for the "could not persist ascii mode" tray warning.
 	// persistTypeDuckAsciiMode() runs on every Shift toggle, so an unlatched
 	// notification would spam the tray while the preferences file stays locked.
-	// Set on the first failure streak, cleared again by the next successful save.
+	// Set on the first failure streak -- whether every WRITE failed, or every READ
+	// did (an unreadable file is never written over, so its retries are reads and
+	// the give-up is the same warning) -- and cleared by the next successful save.
 	// NOTE: declared last; the constructor's member-initializer list must stay in
 	// declaration order, so this one is left to its default member initializer.
 	bool asciiPersistFailureNotified_ = false;

@@ -352,11 +352,18 @@ Moqi::TypeDuck::ApplyResult deployViaLauncher() {
 int applyInstallSettings() {
   const auto path = Moqi::TypeDuck::defaultPreferencesPath();
   Moqi::TypeDuck::Preferences preferences = Moqi::TypeDuck::defaultPreferences();
-  if (std::filesystem::exists(path)) {
-    const auto loaded = Moqi::TypeDuck::loadPreferences(path);
-    if (loaded.ok) {
-      preferences = loaded.preferences;
-    }
+  const auto loaded = Moqi::TypeDuck::loadPreferences(path);
+  if (Moqi::TypeDuck::preferencesBlockWrites(loaded)) {
+    // A settings file is there but could not be read, so the preferences we are
+    // holding are invented defaults. Pushing them through the launcher would
+    // make it save those defaults over settings nobody has read. Refresh the
+    // engine from what is already on disk -- that writes nothing -- and report
+    // the failure instead.
+    deployViaLauncher();
+    return 1;
+  }
+  if (loaded.ok) {
+    preferences = loaded.preferences;
   }
   const auto applyResult = applyViaLauncher(preferences);
   if (!applyResult.ok) {
@@ -433,6 +440,10 @@ class SettingsWindow {
         loadPreferences();
         createControls();
         applyStateToControls();
+        // Must run after createControls(): it takes the write away from a button
+        // that does not exist until then.
+        applyLoadStateToWriteControls();
+        showLoadNotice();
         return 0;
       case WM_HSCROLL:
         if (reinterpret_cast<HWND>(lparam) == pageSizeTrack_) {
@@ -633,9 +644,54 @@ class SettingsWindow {
     const auto loaded = Moqi::TypeDuck::loadPreferences(
         Moqi::TypeDuck::defaultPreferencesPath());
     preferences_ = loaded.preferences;
-    if (!loaded.message.empty()) {
-      MessageBoxW(window_, utf8ToWide(loaded.message).c_str(),
-                  L"TypeDuck 設定 / TypeDuck Settings", MB_ICONWARNING);
+    // A load that could not READ the file hands back defaults, and defaults look
+    // exactly like a clean load. Saving them would overwrite settings that
+    // nobody has read -- so remember that this dialog is showing values it made
+    // up, and refuse to write them back. Corrupt is not the same thing: nothing
+    // parseable is in the file, so resetting it loses nothing and stays allowed.
+    preferencesUnwritable_ = Moqi::TypeDuck::preferencesBlockWrites(loaded);
+    loadNotice_ = loadNoticeFor(loaded);
+  }
+
+  std::wstring loadNoticeFor(
+      const Moqi::TypeDuck::ValidationResult& loaded) const {
+    if (Moqi::TypeDuck::preferencesBlockWrites(loaded)) {
+      return L"無法讀取設定檔，現時顯示的是預設值。為免覆寫檔案內未能讀取的設定，"
+             L"「確定 Confirm」已停用。請關閉可能正在佔用設定檔的程式（例如防毒軟件），"
+             L"或檢查檔案權限，然後重新開啟本視窗。\n\n"
+             L"The settings file could not be read, so the values shown here are "
+             L"defaults. 確定 Confirm is turned off to avoid overwriting the "
+             L"settings the file still holds. Close any program that may be "
+             L"locking the file (antivirus, for example) or check its "
+             L"permissions, then reopen this window.";
+    }
+    if (loaded.source == Moqi::TypeDuck::PreferencesSource::Corrupt) {
+      return L"設定檔的內容無法解析，現時顯示的是預設值。"
+             L"按「確定 Confirm」會以這些設定重新寫入設定檔。\n\n"
+             L"The settings file could not be parsed, so the values shown here "
+             L"are defaults. Choosing 確定 Confirm will rewrite the file with "
+             L"them.";
+    }
+    return utf8ToWide(loaded.message);
+  }
+
+  void showLoadNotice() {
+    if (loadNotice_.empty()) {
+      return;
+    }
+    MessageBoxW(window_, loadNotice_.c_str(),
+                L"TypeDuck 設定 / TypeDuck Settings", MB_ICONWARNING);
+  }
+
+  void applyLoadStateToWriteControls() {
+    if (!preferencesUnwritable_) {
+      return;
+    }
+    // 確定 Confirm is the only control that writes the settings file; 取消 Cancel
+    // just closes the window. Take the write away and leave the rest readable.
+    HWND confirm = GetDlgItem(window_, kConfirm);
+    if (confirm != nullptr) {
+      EnableWindow(confirm, FALSE);
     }
   }
 
@@ -741,6 +797,15 @@ class SettingsWindow {
   }
 
   bool apply() {
+    if (preferencesUnwritable_) {
+      // The settings file could not be read, so preferences_ started life as
+      // defaults. Applying would save those defaults over the settings the file
+      // still holds. Refuse here too, not just at the button: this is the last
+      // gate in front of the write.
+      MessageBoxW(window_, loadNotice_.c_str(),
+                  L"TypeDuck 設定 / TypeDuck Settings", MB_ICONWARNING);
+      return false;
+    }
     collectState();
     const auto result = applyViaLauncher(preferences_);
     if (!result.ok) {
@@ -752,6 +817,13 @@ class SettingsWindow {
   }
 
   void confirmAndClose() {
+    if (preferencesUnwritable_) {
+      // Also the WM_CLOSE path. There is nothing this dialog is allowed to save,
+      // so close instead of failing the apply forever and trapping the user in a
+      // window that will not shut.
+      DestroyWindow(window_);
+      return;
+    }
     if (apply()) {
       DestroyWindow(window_);
     }
@@ -764,6 +836,10 @@ class SettingsWindow {
   HFONT headerFont_ = nullptr;
   std::vector<HWND> sectionHeaders_;
   Moqi::TypeDuck::Preferences preferences_;
+  // True only when the settings file exists but could not be read: the dialog is
+  // then showing invented defaults and must never write them back.
+  bool preferencesUnwritable_ = false;
+  std::wstring loadNotice_;
 };
 
 } // namespace
