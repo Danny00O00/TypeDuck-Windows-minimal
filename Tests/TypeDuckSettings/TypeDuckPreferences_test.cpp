@@ -2,6 +2,7 @@
 
 #include "MoqLauncher/TypeDuckPreferences.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -39,6 +40,7 @@ TEST(TypeDuckPreferences, DefaultsMatchWebAlphaDecisionContract) {
   EXPECT_TRUE(prefs.enableLearning);
   EXPECT_TRUE(prefs.showReverseCode);
   EXPECT_TRUE(prefs.isCangjie5);
+  EXPECT_FALSE(prefs.asciiMode);
 
   const auto descriptors = Moqi::TypeDuck::preferenceDescriptors();
   ASSERT_FALSE(descriptors.empty());
@@ -111,6 +113,75 @@ TEST(TypeDuckPreferences, EnginePreferencesProduceCommonPatchList) {
                 "common:/disable_sentence",
                 "common:/disable_learning",
                 "common:/use_cangjie3"}));
+}
+
+TEST(TypeDuckPreferences, AsciiModeJsonRoundTrip) {
+  // asciiMode persists through save/load so the Shift-toggled input mode
+  // survives launcher, backend, and machine restarts.
+  const auto root = makeTempDir("typeduck-ascii-roundtrip-test");
+  const auto path = root / "preferences.json";
+  auto prefs = Moqi::TypeDuck::defaultPreferences();
+  prefs.asciiMode = true;
+  ASSERT_TRUE(Moqi::TypeDuck::savePreferences(path, prefs).ok);
+
+  EXPECT_NE(readFile(path).find("asciiMode"), std::string::npos);
+  EXPECT_FALSE(std::filesystem::exists(root / "preferences.json.tmp"));
+
+  const auto loaded = Moqi::TypeDuck::loadPreferences(path);
+  EXPECT_TRUE(loaded.ok);
+  EXPECT_TRUE(loaded.preferences.asciiMode);
+}
+
+TEST(TypeDuckPreferences, LegacyJsonWithoutAsciiModeLoadsDefaultFalse) {
+  // Settings files written before asciiMode existed must load safely with
+  // Chinese mode as the default and every other field preserved.
+  const auto root = makeTempDir("typeduck-ascii-legacy-test");
+  const auto path = root / "preferences.json";
+  {
+    std::ofstream stream(path, std::ios::binary);
+    stream << R"({
+  "displayLanguages": ["eng"],
+  "mainLanguage": "eng",
+  "pageSize": 8,
+  "isHeiTypeface": false,
+  "showRomanization": "always",
+  "enableCompletion": true,
+  "enableCorrection": true,
+  "enableSentence": true,
+  "enableLearning": true,
+  "showReverseCode": true,
+  "isCangjie5": true
+})";
+  }
+
+  const auto loaded = Moqi::TypeDuck::loadPreferences(path);
+  EXPECT_TRUE(loaded.ok);
+  EXPECT_FALSE(loaded.preferences.asciiMode);
+  EXPECT_EQ(loaded.preferences.pageSize, 8);
+  EXPECT_TRUE(loaded.preferences.enableCorrection);
+}
+
+TEST(TypeDuckPreferences, AsciiModeIsLiveEngineOptionWithNoRimePatches) {
+  // asciiMode is a live engine option: it rides the backend settings push
+  // but must never change yaml patch output or trigger redeploy.
+  const auto defaults = Moqi::TypeDuck::defaultPreferences();
+  auto toggled = defaults;
+  toggled.asciiMode = true;
+
+  const auto defaultEffects = Moqi::TypeDuck::rimeSideEffects(defaults);
+  const auto toggledEffects = Moqi::TypeDuck::rimeSideEffects(toggled);
+  EXPECT_EQ(toggledEffects.commonPatches, defaultEffects.commonPatches);
+  EXPECT_EQ(toggledEffects.defaultCustomPath, defaultEffects.defaultCustomPath);
+  EXPECT_EQ(toggledEffects.pageSize, defaultEffects.pageSize);
+  EXPECT_FALSE(defaultEffects.asciiMode);
+  EXPECT_TRUE(toggledEffects.asciiMode);
+
+  EXPECT_FALSE(Moqi::TypeDuck::preferenceAffectsRime("asciiMode"));
+  EXPECT_TRUE(Moqi::TypeDuck::preferenceIsLiveEngineOption("asciiMode"));
+  const auto interfaceOnly =
+      Moqi::TypeDuck::interfaceOnlyPreferenceIdsForTest();
+  EXPECT_EQ(std::find(interfaceOnly.begin(), interfaceOnly.end(), "asciiMode"),
+            interfaceOnly.end());
 }
 
 TEST(TypeDuckPreferences, FailedApplyDoesNotCorruptJsonSourceOfTruth) {

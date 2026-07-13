@@ -21,7 +21,6 @@
 namespace {
 
 constexpr COLORREF kWindowBackground = RGB(255, 255, 255);       // panel_background
-constexpr COLORREF kDictionaryBackground = RGB(246, 243, 237);   // dictionary_background
 constexpr COLORREF kLayeredTransparentColor = RGB(255, 0, 255);
 constexpr COLORREF kInputBufferBackground = RGB(246, 234, 216);  // input_buffer_background
 constexpr COLORREF kInputBufferText = RGB(70, 58, 42);           // input_buffer_text
@@ -29,18 +28,12 @@ constexpr COLORREF kWindowBorder = RGB(222, 217, 207);           // panel_border
 constexpr COLORREF kDividerColor = RGB(222, 217, 207);
 constexpr COLORREF kItemText = RGB(36, 34, 30);                  // text_primary
 constexpr COLORREF kSecondaryText = RGB(105, 98, 88);            // text_secondary
-constexpr COLORREF kPronunciationText = RGB(102, 93, 82);        // pronunciation_text
-constexpr COLORREF kDefinitionText = RGB(78, 72, 63);            // definition_text
 constexpr COLORREF kDisabledText = RGB(168, 160, 148);           // disabled_text
 constexpr COLORREF kLinkText = RGB(151, 102, 31);                // link_text
 constexpr COLORREF kSelectedBackground = RGB(254, 220, 156);     // selection_background
 constexpr COLORREF kSelectedText = RGB(36, 34, 30);
-constexpr COLORREF kPosPillBackground = RGB(246, 243, 237);
-constexpr COLORREF kPosPillBorder = RGB(180, 171, 157);
-constexpr COLORREF kPosPillText = RGB(86, 79, 69);
 constexpr int kDefaultCandidateSpacing = 20;
 constexpr int kTypeDuckCandidatePanelRenderer = 1;
-constexpr int kMovementRevealThreshold = 2;
 constexpr int kPageNavNone = -1;
 constexpr int kPageNavPrevious = 0;
 constexpr int kPageNavNext = 1;
@@ -52,35 +45,23 @@ constexpr int kInitialCompactPanelPaddingX = 7;
 constexpr int kInitialCompactPanelPaddingY = 3;
 constexpr int kInitialBorderRadius = 4;
 constexpr int kInitialCandidateMinWidth = 200;
-constexpr int kInitialPanelGap = 10;
-constexpr int kInitialJyutpingColumnWidth = 84;
-constexpr int kInitialHonziColumnWidth = 86;
-constexpr int kInitialNoteColumnWidth = 78;
-constexpr int kInitialDefinitionColumnWidth = 230;
-constexpr int kInitialDictionaryPanelMinHeight = 260;
-constexpr int kPanelPaddingX = 10;
-constexpr int kPanelPaddingY = 6;
+constexpr int kPanelPaddingX = 6;
+constexpr int kPanelPaddingY = 3;
 constexpr int kImmersivePanelPaddingX = 12;
 constexpr int kImmersivePanelPaddingY = 8;
-constexpr int kCandidateMinWidth = 150;
+constexpr int kCandidateMinWidth = 64;
 constexpr int kCandidateBorderRadius = 8;
 constexpr int kCandidateLabelGap = 6;
-constexpr int kCandidateCommentGap = 8;
 constexpr int kCandidatePreeditGap = 8;
 constexpr int kCandidateRowPaddingY = 5;
 constexpr int kCandidateRowInnerGap = 6;
 constexpr int kCandidateRowCornerRadius = 5;
-constexpr int kCandidateSelectionInsetX = 8;
-constexpr int kCandidateIndicatorInsetRight = 8;
-constexpr int kCandidateJyutpingMinWidth = 42;
-constexpr int kCandidateHonziMinWidth = 34;
-constexpr int kCandidateNoteMinWidth = 42;
-constexpr int kCandidateDefinitionMinWidth = 78;
-constexpr int kCandidateColumnPad = 8;
-constexpr int kCandidateIndicatorColumnWidth = 22;
 constexpr int kCandidateBodyLineMinHeight = 25;
-constexpr int kCandidateRowLineMinHeight = 20;
-constexpr int kPageNavWidth = 64;
+constexpr int kCandidateCellGap = 4;
+constexpr int kCandidateCellPadX = 6;
+constexpr int kCandidateCellMaxTextWidth = 168;
+constexpr int kCandidateCellMinTextWidth = 24;
+constexpr int kPageNavWidth = 40;
 constexpr int kPageNavPreeditlessHeight = 30;
 constexpr int kPageNavGlyphPointSize = 28;
 constexpr int kPageNavGlyphYOffset = 7;
@@ -92,39 +73,6 @@ constexpr int kPreeditActivePaddingX = 6;
 constexpr int kPreeditActiveCornerRadius = 5;
 constexpr int kPreeditCursorWidth = 2;
 constexpr int kPreeditCursorVerticalInset = 1;
-constexpr int kDictionaryPanelMinWidth = 260;
-constexpr int kDictionaryPanelMinHeight = 150;
-constexpr int kDictionaryPanelTopPadding = 18;
-constexpr int kDictionaryPanelHorizontalPadding = 16;
-constexpr int kDictionaryPanelVerticalPadding = 16;
-constexpr int kDictionaryWidthSlack = 16;
-constexpr int kDictionaryMeasureWidthPadding = 32;
-constexpr int kDictionaryHeaderGap = 20;
-constexpr int kDictionarySectionSpacing = 16;
-constexpr int kDictionaryPosPadding = 3;
-constexpr int kDictionaryPosGap = 8;
-constexpr int kDictionaryDefinitionGap = 18;
-constexpr int kDictionaryFieldSpacing = 5;
-constexpr int kDictionaryFieldGap = 12;
-constexpr int kDictionaryMoreLanguagesSpacing = 5;
-constexpr int kDictionaryEntrySpacing = 18;
-constexpr int kDictionaryBodyMinHeight = 24;
-constexpr int kDictionaryPillHeight = 20;
-constexpr int kDictionaryPillCornerRadius = 4;
-constexpr int kDictionaryPillBaselineOffset = 2;
-constexpr int kDictionaryPillGap = 8;
-constexpr int kDictionaryLabelBaselineOffset = 1;
-constexpr int kDictionaryScrollViewportMinHeight = 320;
-constexpr int kDictionaryPaintCullPadding = 80;
-constexpr int kDictionaryScrollStep = 36;
-constexpr int kDictionaryScrollTrackPadding = 8;
-constexpr int kDictionaryScrollTrackWidth = 4;
-constexpr int kDictionaryScrollThumbMinHeight = 24;
-constexpr int kDictionaryBridgeOverlap = 6;
-constexpr int kInlineBodySpacingUnit = 4;
-constexpr int kUnboundedMeasureHeight = 32000;
-constexpr COLORREF kDictionaryScrollTrack = RGB(224, 218, 208);
-constexpr COLORREF kDictionaryScrollThumb = RGB(166, 153, 132);
 constexpr const wchar_t* kInputBufferFontName = L"Microsoft JhengHei UI";
 
 Moqi::TextService* productTextService(Ime::TextService* service) {
@@ -367,31 +315,6 @@ HFONT createDerivedFont(HFONT baseFont, const wchar_t* faceName) {
     return ::CreateFontIndirectW(&lf);
 }
 
-SIZE textExtent(HDC hdc, HFONT font, const std::wstring& text) {
-    HGDIOBJ oldFont = ::SelectObject(hdc, font);
-    SIZE size{};
-    if (!text.empty()) {
-        ::GetTextExtentPoint32W(hdc, text.c_str(), static_cast<int>(text.length()), &size);
-        size.cx += 1;
-    }
-    ::SelectObject(hdc, oldFont);
-    return size;
-}
-
-std::wstring joinDisplayValues(const std::vector<std::wstring>& values, const std::wstring& separator) {
-    std::wstring result;
-    for (const auto& value : values) {
-        if (value.empty()) {
-            continue;
-        }
-        if (!result.empty()) {
-            result += separator;
-        }
-        result += value;
-    }
-    return result;
-}
-
 void appendCandidateWindowLog(const std::wstring& message) {
     if (!Ime::isTraceLoggingEnabled()) {
         return;
@@ -551,36 +474,18 @@ CandidateWindow::CandidateWindow(Ime::TextService* service, Ime::EditSession* se
       padX_(service->isImmersive() ? kPanelPaddingX : kInitialCompactPanelPaddingX),
       padY_(service->isImmersive() ? kPanelPaddingY : kInitialCompactPanelPaddingY),
       labelGap_(kCandidateLabelGap),
-      commentGap_(kCandidateCommentGap),
+      cellGap_(kCandidateCellGap),
       borderWidth_(kBorderWidth),
       borderRadius_(kInitialBorderRadius),
       minWidth_(kInitialCandidateMinWidth),
       preeditHeight_(0),
       preeditGap_(kCandidatePreeditGap),
       contentTop_(0),
-      panelGap_(kInitialPanelGap),
       rowPaddingY_(kCandidateRowPaddingY),
       rowInnerGap_(kCandidateRowInnerGap),
-      jyutpingColumnWidth_(kInitialJyutpingColumnWidth),
-      honziColumnWidth_(kInitialHonziColumnWidth),
-      noteColumnWidth_(kInitialNoteColumnWidth),
-      definitionColumnWidth_(kInitialDefinitionColumnWidth),
-      indicatorColumnWidth_(kCandidateIndicatorColumnWidth),
       pageNavWidth_(kPageNavWidth),
       candidatePanelWidth_(0),
       candidatePanelHeight_(0),
-      dictionaryPanelWidth_(0),
-      dictionaryPanelTop_(0),
-      dictionaryPanelHeight_(0),
-      dictionaryPanelMinHeight_(kInitialDictionaryPanelMinHeight),
-      dictionaryContentHeight_(0),
-      dictionaryScrollOffset_(0),
-      dictionaryRevealIndex_(-1),
-      dictionaryHoverIndex_(-1),
-      actualPointerMovementCount_(0),
-      movementRevealThreshold_(kMovementRevealThreshold),
-      lastMouseMovePoint_{0, 0},
-      hasLastMouseMovePoint_(false),
       backgroundColor_(kWindowBackground),
       highlightColor_(kSelectedBackground),
       textColor_(kItemText),
@@ -590,6 +495,7 @@ CandidateWindow::CandidateWindow(Ime::TextService* service, Ime::EditSession* se
       preeditCursor_(0),
       preeditSelectionStart_(0),
       preeditSelectionEnd_(0),
+      commentFont_(nullptr),
       currentSel_(0),
       pressedSel_(-1),
       pressedPageNavDirection_(kPageNavNone),
@@ -600,8 +506,7 @@ CandidateWindow::CandidateWindow(Ime::TextService* service, Ime::EditSession* se
       ownedCommentFont_(nullptr),
       draggingWindow_(false),
       trackingMouse_(false),
-      useCursor_(false),
-      commentFont_(nullptr) {
+      useCursor_(false) {
     margin_ = 0;
 
     const HWND rawOwner = resolveCandidateOwnerWindow(session);
@@ -821,12 +726,6 @@ void CandidateWindow::clear() {
     itemHeights_.clear();
     candidatePanelWidth_ = 0;
     candidatePanelHeight_ = 0;
-    dictionaryPanelWidth_ = 0;
-    dictionaryPanelTop_ = 0;
-    dictionaryPanelHeight_ = 0;
-    dictionaryContentHeight_ = 0;
-    dictionaryScrollOffset_ = 0;
-    resetDictionaryReveal(false);
     if (::GetCapture() != hwnd_) {
         pressedSel_ = -1;
     }
@@ -868,14 +767,7 @@ void CandidateWindow::setCurrentSel(int sel) {
         sel = 0;
     }
     if (currentSel_ != sel) {
-        const bool oldDictionaryVisible = dictionaryPanelVisible();
         currentSel_ = sel;
-        if (dictionaryRevealIndex_ >= static_cast<int>(items_.size())) {
-            resetDictionaryReveal();
-        }
-        if (Ime::isDebugLoggingEnabled() && oldDictionaryVisible != dictionaryPanelVisible()) {
-            recalculateSize();
-        }
         if (isVisible()) {
             ::InvalidateRect(hwnd_, NULL, TRUE);
         }
@@ -1119,33 +1011,19 @@ void CandidateWindow::recalculateSize() {
     if (!hdc) {
         return;
     }
-    if (dictionaryHoverIndex_ >= static_cast<int>(items_.size())) {
-        dictionaryHoverIndex_ = -1;
-    }
-    if (dictionaryRevealIndex_ >= static_cast<int>(items_.size())) {
-        dictionaryRevealIndex_ = -1;
-    }
 
     const int scaledPadX = scalePx(textService_->isImmersive() ? kImmersivePanelPaddingX : kPanelPaddingX);
     const int scaledPadY = scalePx(textService_->isImmersive() ? kImmersivePanelPaddingY : kPanelPaddingY);
     padX_ = scaledPadX;
     padY_ = scaledPadY;
     labelGap_ = scalePx(kCandidateLabelGap);
-    commentGap_ = scalePx(kCandidateCommentGap);
+    cellGap_ = scalePx(kCandidateCellGap);
     borderWidth_ = (std::max)(kBorderWidth, scalePx(kBorderWidth));
     borderRadius_ = scalePx(kCandidateBorderRadius);
     preeditGap_ = scalePx(kCandidatePreeditGap);
-    // Keep panels touching so pointer travel into the dictionary panel stays inside this shaped popup.
-    panelGap_ = 0;
     rowPaddingY_ = scalePx(kCandidateRowPaddingY);
     rowInnerGap_ = scalePx(kCandidateRowInnerGap);
     pageNavWidth_ = scalePx(kPageNavWidth);
-    indicatorColumnWidth_ = scalePx(kCandidateIndicatorColumnWidth);
-    jyutpingColumnWidth_ = 0;
-    honziColumnWidth_ = 0;
-    noteColumnWidth_ = 0;
-    definitionColumnWidth_ = 0;
-    dictionaryPanelMinHeight_ = scalePx(kDictionaryPanelMinHeight);
     minWidth_ = scalePx(kCandidateMinWidth);
 
     selKeyWidth_ = 0;
@@ -1158,49 +1036,15 @@ void CandidateWindow::recalculateSize() {
     itemWidths_.assign(items_.size(), 0);
     itemHeights_.assign(items_.size(), 0);
     int preeditWidth = 0;
-    int jyutpingContentWidth = 0;
     int honziContentWidth = 0;
-    int noteContentWidth = 0;
-    int definitionContentWidth = 0;
-    bool hasJyutpingColumn = false;
-    bool hasNoteColumn = false;
-    bool hasDefinitionColumn = false;
-    bool hasIndicatorColumn = false;
 
     HGDIOBJ oldFont = ::SelectObject(hdc, font_);
     HFONT rowMetaFont = createPointFontForDpi(dpiY_, L"Segoe UI", 12);
     TEXTMETRICW metrics = {};
-    TEXTMETRICW commentMetrics = {};
     ::GetTextMetricsW(hdc, &metrics);
-    if (commentFont_) {
-        ::SelectObject(hdc, commentFont_);
-        ::GetTextMetricsW(hdc, &commentMetrics);
-        ::SelectObject(hdc, font_);
-    }
     const int bodyLineHeight = (std::max)(
         scalePx(kCandidateBodyLineMinHeight),
-        static_cast<int>((std::max)(
-            metrics.tmHeight + metrics.tmExternalLeading,
-            commentFont_ ? commentMetrics.tmHeight + commentMetrics.tmExternalLeading : 0)));
-    auto measureWithFont = [&](HFONT font, const std::wstring& value) -> int {
-        if (value.empty()) {
-            return 0;
-        }
-        HGDIOBJ previous = ::SelectObject(hdc, font ? font : font_);
-        SIZE size = {};
-        ::GetTextExtentPoint32W(hdc, value.c_str(), static_cast<int>(value.length()), &size);
-        ::SelectObject(hdc, previous);
-        return static_cast<int>(size.cx) + 1;
-    };
-    auto layoutDefinition = [&](const TypeDuck::CandidateEntry& entry,
-                                const CandidateUiItem&) -> std::wstring {
-        std::wstring definition = entry.definition(displayPreferences_.mainLanguage);
-        if (definition.empty()) {
-            const std::wstring reference = entry.canonicalReference();
-            definition = reference.empty() ? joinDisplayValues(entry.formattedLabels(), L" ") : L"→" + reference;
-        }
-        return definition;
-    };
+        static_cast<int>(metrics.tmHeight + metrics.tmExternalLeading));
     for (int i = 0, n = static_cast<int>(items_.size()); i < n; ++i) {
         SIZE selKeySize = {};
         wchar_t selKey[] = L"?.";
@@ -1211,70 +1055,13 @@ void CandidateWindow::recalculateSize() {
         selKeyWidth_ = (std::max)(selKeyWidth_, static_cast<int>(selKeySize.cx));
 
         SIZE candidateSize = {};
-        const CandidateUiItem& item = items_[i];
-        const std::wstring itemText = item.displayText();
-        const std::wstring itemComment = item.displayComment();
+        const std::wstring itemText = items_[i].displayText();
         ::GetTextExtentPoint32W(hdc, itemText.c_str(), static_cast<int>(itemText.length()), &candidateSize);
-        itemTextWidths_[i] = static_cast<int>(candidateSize.cx);
-        textWidth_ = (std::max)(textWidth_, static_cast<int>(candidateSize.cx));
-        const int candidateEntryRows = entryRowCount(item);
-        if (!itemComment.empty() && commentFont_) {
-            SIZE commentSize = {};
-            ::SelectObject(hdc, commentFont_);
-            ::GetTextExtentPoint32W(hdc, itemComment.c_str(), static_cast<int>(itemComment.length()), &commentSize);
-            ::SelectObject(hdc, font_);
-            itemCommentWidths_[i] = static_cast<int>(commentSize.cx);
-            commentWidth_ = (std::max)(commentWidth_, static_cast<int>(commentSize.cx));
-        }
-        itemHeights_[i] = rowPaddingY_ * 2 + candidateEntryRows * bodyLineHeight;
+        itemTextWidths_[i] = static_cast<int>(candidateSize.cx) + 1;
+        textWidth_ = (std::max)(textWidth_, itemTextWidths_[i]);
+        honziContentWidth = (std::max)(honziContentWidth, itemTextWidths_[i]);
+        itemHeights_[i] = rowPaddingY_ * 2 + bodyLineHeight;
         itemHeight_ = (std::max)(itemHeight_, itemHeights_[i]);
-
-        std::vector<TypeDuck::CandidateEntry> layoutEntries = item.candidateInfo.matchedEntries();
-        if (layoutEntries.empty()) {
-            layoutEntries = item.candidateInfo.entries;
-        }
-        if (layoutEntries.empty()) {
-            TypeDuck::CandidateEntry fallbackEntry;
-            fallbackEntry.honzi = item.displayText();
-            layoutEntries.push_back(std::move(fallbackEntry));
-        }
-
-        const bool showJyutping = displayPreferences_.shouldShowJyutping(item.candidateInfo.isReverseLookup);
-        for (int entryIndex = 0; entryIndex < static_cast<int>(layoutEntries.size()); ++entryIndex) {
-            const TypeDuck::CandidateEntry& entry = layoutEntries[entryIndex];
-            if (showJyutping && !entry.jyutping.empty()) {
-                hasJyutpingColumn = true;
-                jyutpingContentWidth = (std::max)(
-                    jyutpingContentWidth,
-                    measureWithFont(rowMetaFont ? rowMetaFont : (commentFont_ ? commentFont_ : font_), entry.jyutping));
-            }
-
-            const std::wstring honzi = entry.honzi.empty() ? item.displayText() : entry.honzi;
-            if (!honzi.empty()) {
-                honziContentWidth = (std::max)(honziContentWidth, measureWithFont(font_, honzi));
-            }
-
-            const std::wstring note = (!item.candidateInfo.isReverseLookup || displayPreferences_.showReverseCode)
-                                          ? item.candidateInfo.note
-                                          : L"";
-            if (entryIndex == 0 && !note.empty()) {
-                hasNoteColumn = true;
-                noteContentWidth = (std::max)(
-                    noteContentWidth,
-                    measureWithFont(commentFont_ ? commentFont_ : font_, note));
-            }
-
-            const std::wstring definition = layoutDefinition(entry, item);
-            if (!definition.empty()) {
-                hasDefinitionColumn = true;
-                definitionContentWidth = (std::max)(
-                    definitionContentWidth,
-                    measureWithFont(commentFont_ ? commentFont_ : font_, definition));
-            }
-        }
-        if (item.candidateInfo.hasDictionaryEntry(displayPreferences_)) {
-            hasIndicatorColumn = true;
-        }
     }
     if (!preedit_.empty()) {
         HFONT inputFont = createDerivedFont(font_, kInputBufferFontName);
@@ -1290,137 +1077,6 @@ void CandidateWindow::recalculateSize() {
         preeditHeight_ = static_cast<int>(preeditSize.cy);
     }
 
-    int dictionaryContentWidth = 0;
-    dictionaryContentHeight_ = 0;
-    if (dictionaryPanelVisible()) {
-        HFONT entryFont = createPointFontForDpi(dpiY_, L"DFKai-SB", 32);
-        HFONT pronFont = createPointFontForDpi(dpiY_, L"Segoe UI", 15);
-        HFONT pronTypeFont = createPointFontForDpi(dpiY_, L"Segoe UI", 12);
-        HFONT posFont = createPointFontForDpi(dpiY_, L"Segoe UI", 10);
-        HFONT bodyFont = createPointFontForDpi(dpiY_, L"Segoe UI", 12);
-        HFONT valueFont = createPointFontForDpi(dpiY_, L"Microsoft JhengHei", 12);
-        HFONT captionFont = createPointFontForDpi(dpiY_, L"Segoe UI", 13, FW_SEMIBOLD);
-        const int titleGap = scalePx(kDictionaryHeaderGap);
-        const int posPadding = scalePx(kDictionaryPosPadding);
-        const int posGap = scalePx(kDictionaryPosGap);
-        const int labelGap = scalePx(kCandidateCommentGap);
-        const int definitionGap = scalePx(kDictionaryDefinitionGap);
-        const int fieldGap = scalePx(kDictionaryFieldGap);
-        const int pillGap = scalePx(kDictionaryPillGap);
-        auto addWidth = [&](int width) {
-            dictionaryContentWidth = (std::max)(dictionaryContentWidth, width);
-        };
-        auto joinedInlineBody = [&](const TypeDuck::CandidateEntry& entry) {
-            std::wstring body;
-            for (const auto& reg : entry.formattedRegister()) {
-                if (!body.empty()) {
-                    body += L"  ";
-                }
-                body += reg;
-            }
-            for (const auto& label : entry.formattedLabels()) {
-                if (!body.empty()) {
-                    body += std::wstring(labelGap / (std::max)(1, scalePx(kInlineBodySpacingUnit)), L' ');
-                }
-                body += label;
-            }
-            const std::wstring canonical = entry.canonicalReference();
-            if (!canonical.empty()) {
-                if (!body.empty()) {
-                    body += L"  ";
-                }
-                body += L"→" + canonical;
-            } else {
-                const std::wstring mainDefinition = entry.definition(displayPreferences_.mainLanguage);
-                if (!mainDefinition.empty()) {
-                    if (!body.empty()) {
-                        body += L"  ";
-                    }
-                    body += mainDefinition;
-                }
-            }
-            return body;
-        };
-        const TypeDuck::CandidateInfo& dictionaryInfo =
-            items_[effectiveDictionaryIndex()].candidateInfo;
-        for (const auto& entry : dictionaryInfo.entries) {
-            if (!entry.isDictionaryEntry(displayPreferences_)) {
-                continue;
-            }
-            int headerWidth = static_cast<int>(textExtent(hdc, entryFont, entry.honzi).cx);
-            const int pronWidth = static_cast<int>(textExtent(hdc, pronFont, entry.jyutping).cx);
-            const std::wstring pronType = entry.pronunciationType();
-            const int pronTypeWidth = static_cast<int>(textExtent(hdc, pronTypeFont, pronType).cx);
-            if (pronWidth > 0) {
-                headerWidth += titleGap + pronWidth;
-            }
-            if (pronTypeWidth > 0) {
-                headerWidth += titleGap + pronTypeWidth;
-            }
-            addWidth(headerWidth);
-
-            int posWidth = 0;
-            for (const auto& part : entry.formattedPartsOfSpeech()) {
-                const int pillWidth = static_cast<int>(textExtent(hdc, posFont, part).cx) + posPadding * 2;
-                if (posWidth > 0) {
-                    posWidth += pillGap;
-                }
-                posWidth += pillWidth;
-            }
-            const int bodyWidth =
-                static_cast<int>(textExtent(hdc, bodyFont, joinedInlineBody(entry)).cx) +
-                scalePx(kDictionaryWidthSlack);
-            addWidth(posWidth + (posWidth > 0 && bodyWidth > 0 ? definitionGap - posGap : 0) + bodyWidth);
-
-            int keyWidth = 0;
-            for (const auto& other : entry.otherData()) {
-                keyWidth = (std::max)(keyWidth, static_cast<int>(textExtent(hdc, bodyFont, other.name).cx));
-            }
-            for (const auto& other : entry.otherData()) {
-                for (const auto& value : other.values()) {
-                    addWidth(keyWidth + fieldGap + static_cast<int>(textExtent(hdc, valueFont, value).cx));
-                }
-            }
-
-            const auto moreLanguages = entry.otherLanguages(displayPreferences_);
-            if (!moreLanguages.empty()) {
-                addWidth(static_cast<int>(textExtent(hdc, captionFont, L"More Languages").cx));
-                int languageKeyWidth = 0;
-                for (const auto& language : moreLanguages) {
-                    languageKeyWidth = (std::max)(languageKeyWidth,
-                                                  static_cast<int>(textExtent(hdc, bodyFont, language.name).cx));
-                }
-                for (const auto& language : moreLanguages) {
-                    addWidth(languageKeyWidth + fieldGap +
-                             static_cast<int>(textExtent(hdc, valueFont, language.value).cx));
-                }
-            }
-        }
-        ::DeleteObject(captionFont);
-        ::DeleteObject(valueFont);
-        ::DeleteObject(bodyFont);
-        ::DeleteObject(posFont);
-        ::DeleteObject(pronTypeFont);
-        ::DeleteObject(pronFont);
-        ::DeleteObject(entryFont);
-    }
-    dictionaryPanelWidth_ = dictionaryPanelVisible()
-                                ? (std::max)(dictionaryContentWidth + scalePx(kDictionaryMeasureWidthPadding),
-                                             scalePx(kDictionaryPanelMinWidth))
-                                : 0;
-    if (dictionaryPanelVisible()) {
-        RECT measureRc = {0, 0, dictionaryPanelWidth_, kUnboundedMeasureHeight};
-        int y = measureRc.top + scalePx(kDictionaryPanelTopPadding);
-        const TypeDuck::CandidateInfo& dictionaryInfo =
-            items_[effectiveDictionaryIndex()].candidateInfo;
-        for (const auto& entry : dictionaryInfo.entries) {
-            if (!entry.isDictionaryEntry(displayPreferences_)) {
-                continue;
-            }
-            paintDictionaryEntry(hdc, y, measureRc, entry, false);
-        }
-        dictionaryContentHeight_ = (std::max)(0, static_cast<int>(y - measureRc.top));
-    }
     if (rowMetaFont) {
         ::DeleteObject(rowMetaFont);
     }
@@ -1431,51 +1087,76 @@ void CandidateWindow::recalculateSize() {
                          ? 0
                          : (std::max)(preeditHeight_, static_cast<int>(metrics.tmHeight + metrics.tmExternalLeading));
 
-    const int columnPad = scalePx(kCandidateColumnPad);
-    jyutpingColumnWidth_ = hasJyutpingColumn
-                               ? (std::max)(jyutpingContentWidth + columnPad, scalePx(kCandidateJyutpingMinWidth))
-                               : 0;
-    honziColumnWidth_ = (std::max)(honziContentWidth + columnPad, scalePx(kCandidateHonziMinWidth));
-    noteColumnWidth_ = hasNoteColumn
-                           ? (std::max)(noteContentWidth + columnPad, scalePx(kCandidateNoteMinWidth))
-                           : 0;
-    definitionColumnWidth_ = hasDefinitionColumn
-                                 ? (std::max)(definitionContentWidth + columnPad,
-                                              scalePx(kCandidateDefinitionMinWidth))
-                                 : 0;
-    indicatorColumnWidth_ = hasIndicatorColumn ? scalePx(kCandidateIndicatorColumnWidth) : 0;
-
-    auto rowBodyWidth = [&]() {
-        int width = 0;
-        auto addColumn = [&](int columnWidth) {
-            if (columnWidth <= 0) {
-                return;
-            }
-            if (width > 0) {
-                width += rowInnerGap_;
-            }
-            width += columnWidth;
-        };
-        addColumn(jyutpingColumnWidth_);
-        addColumn(honziColumnWidth_);
-        addColumn(noteColumnWidth_);
-        addColumn(definitionColumnWidth_);
-        addColumn(indicatorColumnWidth_);
-        return width;
-    };
-    const int rowContentWidth = selKeyWidth_ + labelGap_ + rowBodyWidth();
-    for (int i = 0, n = static_cast<int>(items_.size()); i < n; ++i) {
-        itemWidths_[i] = rowContentWidth;
+    const int cellPadX = scalePx(kCandidateCellPadX);
+    const int cellMaxTextWidth = scalePx(kCandidateCellMaxTextWidth);
+    const int cellMinTextWidth = scalePx(kCandidateCellMinTextWidth);
+    const int cellFixedWidth = selKeyWidth_ + labelGap_ + cellPadX * 2;
+    const int n = static_cast<int>(items_.size());
+    std::vector<int> cellTextWidths(n, 0);
+    for (int i = 0; i < n; ++i) {
+        cellTextWidths[i] = (std::min)(itemTextWidths_[i], cellMaxTextWidth);
     }
 
-    const int rows = static_cast<int>(items_.size());
-    const int candidateContentWidth = rowContentWidth;
-    const int contentWidth = (std::max)((std::max)(candidateContentWidth, preeditWidth + pageNavWidth_), minWidth_);
+    // Monitor work area is physical pixels while the per-monitor DPI awareness
+    // scope is active, matching every scalePx()-derived width below.
+    int workAreaWidth = 0;
+    {
+        const HWND owner = hwnd_
+            ? reinterpret_cast<HWND>(::GetWindowLongPtr(hwnd_, GWLP_HWNDPARENT))
+            : nullptr;
+        HMONITOR monitor = ::MonitorFromWindow(owner ? owner : hwnd_, MONITOR_DEFAULTTONEAREST);
+        MONITORINFO monitorInfo = {};
+        monitorInfo.cbSize = sizeof(monitorInfo);
+        if (monitor != nullptr && ::GetMonitorInfoW(monitor, &monitorInfo)) {
+            workAreaWidth = monitorInfo.rcWork.right - monitorInfo.rcWork.left;
+        }
+        if (workAreaWidth <= 0) {
+            workAreaWidth = ::GetSystemMetrics(SM_CXFULLSCREEN);
+        }
+    }
+
+    const int navWidth = n > 0 ? cellGap_ + pageNavWidth_ : 0;
+    if (n > 0 && workAreaWidth > 0) {
+        const int availableTextWidth = workAreaWidth -
+                                       (padX_ * 2 + borderWidth_ * 2) -
+                                       navWidth -
+                                       n * cellFixedWidth -
+                                       (n - 1) * cellGap_;
+        int totalTextWidth = 0;
+        for (int i = 0; i < n; ++i) {
+            totalTextWidth += cellTextWidths[i];
+        }
+        if (totalTextWidth > availableTextWidth) {
+            int cap = cellMaxTextWidth;
+            while (cap > cellMinTextWidth) {
+                int cappedTotal = 0;
+                for (int i = 0; i < n; ++i) {
+                    cappedTotal += (std::min)(cellTextWidths[i], cap);
+                }
+                if (cappedTotal <= availableTextWidth) {
+                    break;
+                }
+                --cap;
+            }
+            for (int i = 0; i < n; ++i) {
+                cellTextWidths[i] = (std::min)(cellTextWidths[i], cap);
+            }
+        }
+    }
+
+    int candidateRowWidth = 0;
+    for (int i = 0; i < n; ++i) {
+        itemWidths_[i] = cellFixedWidth + cellTextWidths[i];
+        if (i > 0) {
+            candidateRowWidth += cellGap_;
+        }
+        candidateRowWidth += itemWidths_[i];
+    }
+    candidateRowWidth += navWidth;
+
+    const int contentWidth = (std::max)((std::max)(candidateRowWidth, preeditWidth), minWidth_);
     const int candidatePanelWidth = padX_ * 2 + contentWidth + borderWidth_ * 2;
-    int candidatePanelHeight = (std::max)(0, rows - 1) * rowSpacing_;
-    for (int height : itemHeights_) {
-        candidatePanelHeight += height;
-    }
+    int candidatePanelHeight = itemHeight_;
     if (!preedit_.empty()) {
         contentTop_ = borderWidth_ + padY_ + preeditHeight_ + preeditGap_;
         candidatePanelHeight += preeditHeight_ + preeditGap_;
@@ -1485,40 +1166,14 @@ void CandidateWindow::recalculateSize() {
     candidatePanelHeight += padY_ * 2 + borderWidth_ * 2;
     candidatePanelWidth_ = candidatePanelWidth;
     candidatePanelHeight_ = candidatePanelHeight;
-    if (dictionaryPanelVisible()) {
-        const int scrollingViewportHeight = (std::max)(scalePx(kDictionaryScrollViewportMinHeight), candidatePanelHeight_);
-        dictionaryPanelHeight_ = dictionaryContentHeight_ > scrollingViewportHeight
-                                     ? scrollingViewportHeight
-                                     : (std::max)(dictionaryPanelMinHeight_, dictionaryContentHeight_);
-        dictionaryPanelTop_ = 0;
-        const int dictionaryIndex = effectiveDictionaryIndex();
-        if (dictionaryIndex >= 0 && dictionaryIndex < static_cast<int>(items_.size())) {
-            RECT dictionaryTargetRc = {};
-            itemRect(dictionaryIndex, dictionaryTargetRc);
-            const int targetBottom = static_cast<int>(dictionaryTargetRc.bottom);
-            if (targetBottom > dictionaryPanelHeight_) {
-                dictionaryPanelTop_ = (std::max)(
-                    0,
-                    (std::min)(candidatePanelHeight_ - dictionaryPanelHeight_,
-                               targetBottom - dictionaryPanelHeight_));
-            }
-        }
-    } else {
-        dictionaryPanelTop_ = 0;
-        dictionaryPanelHeight_ = 0;
-        dictionaryScrollOffset_ = 0;
-    }
-    clampDictionaryScrollOffset();
-    const int dictionaryHeight = dictionaryPanelVisible() ? dictionaryPanelTop_ + dictionaryPanelHeight_ : 0;
-    const int width = candidatePanelWidth +
-                      (dictionaryPanelVisible() ? panelGap_ + dictionaryPanelWidth_ : 0);
-    const int height = (std::max)(candidatePanelHeight, dictionaryHeight);
-    resizeForLayout(width, height);
+    resizeForLayout(candidatePanelWidth_, candidatePanelHeight_);
     applyWindowShape();
 
     std::wostringstream log;
     log << L"[CandidateWindow::recalculateSize] items=" << items_.size()
-        << L" width=" << width << L" height=" << height
+        << L" width=" << candidatePanelWidth_ << L" height=" << candidatePanelHeight_
+        << L" honzi_content_width=" << honziContentWidth
+        << L" work_area_width=" << workAreaWidth
         << L" perRow=" << candPerRow_;
     appendCandidateWindowLog(log.str());
 }
@@ -1589,57 +1244,24 @@ void CandidateWindow::renderSurface(HDC hdc, const RECT& rc, bool transparentOut
     HBRUSH backgroundBrush = ::CreateSolidBrush(backgroundColor_);
     HBRUSH borderBrush = ::CreateSolidBrush(kWindowBorder);
     const int candidatePanelWidth = candidatePanelWidth_ > 0 ? candidatePanelWidth_ : rc.right - rc.left;
-    const int dictionaryRight = candidatePanelWidth + panelGap_ + dictionaryPanelWidth_;
     RECT candidatePanelRc = {rc.left, rc.top, candidatePanelWidth, rc.top + candidatePanelHeight_};
     HRGN windowRgn = ::CreateRoundRectRgn(
         candidatePanelRc.left, candidatePanelRc.top,
         candidatePanelRc.right + 1, candidatePanelRc.bottom + 1,
         borderRadius_ * 2, borderRadius_ * 2);
-    if (dictionaryPanelVisible()) {
-        HRGN dictionaryWindowRgn = ::CreateRoundRectRgn(
-            candidatePanelRc.right + panelGap_,
-            rc.top + dictionaryPanelTop_,
-            dictionaryRight + 1,
-            rc.top + dictionaryPanelTop_ + dictionaryPanelHeight_ + 1,
-            borderRadius_ * 2,
-            borderRadius_ * 2);
-        ::CombineRgn(windowRgn, windowRgn, dictionaryWindowRgn, RGN_OR);
-        ::DeleteObject(dictionaryWindowRgn);
-    }
     ::FillRgn(hdc, windowRgn, backgroundBrush);
     ::FrameRgn(hdc, windowRgn, borderBrush, borderWidth_, borderWidth_);
 
     paintInputBuffer(hdc, candidatePanelRc);
-    paintPageNavigation(hdc, candidatePanelRc);
-
-    int y = contentTop_;
-    for (int i = 0, n = static_cast<int>(items_.size()); i < n; ++i) {
-        const int rowHeight = itemHeight(i);
-        RECT rowRc = {
-            borderWidth_ + padX_ / 2,
-            y,
-            candidatePanelRc.right - borderWidth_ - padX_ / 2,
-            y + rowHeight};
-        paintCandidateRow(hdc, i, rowRc);
-        y += rowHeight + rowSpacing_;
+    if (!items_.empty()) {
+        paintPageNavigation(hdc, candidatePanelRc);
     }
 
-    if (dictionaryPanelVisible()) {
-        RECT dictionaryRc = {
-            candidatePanelRc.right + panelGap_,
-            rc.top + dictionaryPanelTop_,
-            dictionaryRight,
-            rc.top + dictionaryPanelTop_ + dictionaryPanelHeight_};
-        HRGN dictionaryRgn = ::CreateRoundRectRgn(
-            dictionaryRc.left, dictionaryRc.top, dictionaryRc.right + 1, dictionaryRc.bottom + 1,
-            borderRadius_ * 2, borderRadius_ * 2);
-        HBRUSH dictionaryBrush = ::CreateSolidBrush(kDictionaryBackground);
-        ::FillRgn(hdc, dictionaryRgn, dictionaryBrush);
-        ::FrameRgn(hdc, dictionaryRgn, borderBrush, borderWidth_, borderWidth_);
-        ::DeleteObject(dictionaryBrush);
-        ::DeleteObject(dictionaryRgn);
-        paintDictionaryPanel(hdc, dictionaryRc, items_[effectiveDictionaryIndex()].candidateInfo);
-        paintDictionaryScrollBar(hdc, dictionaryRc);
+    int x = borderWidth_ + padX_;
+    for (int i = 0, n = static_cast<int>(items_.size()); i < n; ++i) {
+        RECT cellRc = {x, contentTop_, x + itemWidth(i), contentTop_ + itemHeight(i)};
+        paintCandidateRow(hdc, i, cellRc);
+        x = cellRc.right + cellGap_;
     }
 
     ::DeleteObject(windowRgn);
@@ -1719,7 +1341,7 @@ void CandidateWindow::paintInputBuffer(HDC hdc, const RECT& panelRc) {
     RECT preeditRc = {
         panelRc.left + borderWidth_ + padX_ / 2,
         panelRc.top + borderWidth_ + padY_,
-        panelRc.right - borderWidth_ - padX_ - pageNavWidth_,
+        panelRc.right - borderWidth_ - padX_,
         panelRc.top + borderWidth_ + padY_ + preeditHeight_ + scalePx(kPreeditExtraHeight)};
     HFONT inputFont = createDerivedFont(font_, kInputBufferFontName);
     HGDIOBJ oldFont = ::SelectObject(hdc, inputFont ? inputFont : font_);
@@ -1859,23 +1481,11 @@ void CandidateWindow::paintPageNavigation(HDC hdc, const RECT& panelRc) {
     }
 }
 
-void CandidateWindow::paintItem(HDC hdc, int index, int x, int y) {
-    RECT rowRc = {x, y, x + itemWidth(index), y + itemHeight(index)};
-    paintCandidateRow(hdc, index, rowRc);
-}
-
 void CandidateWindow::paintCandidateRow(HDC hdc, int index, const RECT& rowRc) {
-    // Mirrors TypeDuck Web definitionLayout: enabled displayLanguages decide
-    // which mainLanguage/otherLanguages definitions are visible.
-    const bool selected = dictionaryHoverIndex_ >= 0
-                              ? index == dictionaryHoverIndex_
-                              : (useCursor_ && index == currentSel_);
-
-    const COLORREF bgColor = selected ? highlightColor_ : backgroundColor_;
-    const COLORREF selColor = selected ? highlightTextColor_ : textColor_;
+    const bool selected = useCursor_ && index == currentSel_;
 
     if (selected) {
-        HBRUSH highlightBrush = ::CreateSolidBrush(bgColor);
+        HBRUSH highlightBrush = ::CreateSolidBrush(highlightColor_);
         HRGN rowRgn = ::CreateRoundRectRgn(rowRc.left, rowRc.top, rowRc.right + 1, rowRc.bottom + 1,
                                            scalePx(kCandidateRowCornerRadius) * 2,
                                            scalePx(kCandidateRowCornerRadius) * 2);
@@ -1884,405 +1494,32 @@ void CandidateWindow::paintCandidateRow(HDC hdc, int index, const RECT& rowRc) {
         ::DeleteObject(highlightBrush);
     }
 
-    RECT selRc = rowRc;
-    selRc.left += scalePx(kCandidateSelectionInsetX);
-    selRc.right = selRc.left + selKeyWidth_;
-    RECT firstLineRc = selRc;
     wchar_t selKey[] = L"?.";
     selKey[0] = selKeys_[index];
-    const COLORREF oldColor = ::SetTextColor(hdc, selColor);
     HFONT rowMetaFont = createPointFontForDpi(dpiY_, L"Segoe UI", 12);
     HGDIOBJ oldFont = ::SelectObject(hdc, rowMetaFont ? rowMetaFont : font_);
+    const COLORREF oldColor = ::SetTextColor(hdc, selected ? commentHighlightColor_ : kSecondaryText);
 
-    const CandidateUiItem& item = items_[index];
-    const auto matchedEntries = item.candidateInfo.matchedEntries();
-    const std::vector<TypeDuck::CandidateEntry>& allEntries = item.candidateInfo.entries;
-    const bool useMatched = !matchedEntries.empty();
-    const int rowCount = entryRowCount(item);
-    const int lineHeight =
-        (std::max)(scalePx(kCandidateRowLineMinHeight), (itemHeight(index) - rowPaddingY_ * 2) / rowCount);
-    int y = rowRc.top + rowPaddingY_;
-    firstLineRc.top = y;
-    firstLineRc.bottom = y + lineHeight;
-    // candidateBaselineAligned: labels, Jyutping, Honzi, and definitions share the first row baseline.
-    ::DrawTextW(hdc, selKey, 2, &firstLineRc, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+    const int cellPadX = scalePx(kCandidateCellPadX);
+    RECT selRc = rowRc;
+    selRc.left += cellPadX;
+    selRc.right = selRc.left + selKeyWidth_;
+    ::DrawTextW(hdc, selKey, 2, &selRc, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
 
     ::SelectObject(hdc, font_);
-    for (int entryIndex = 0; entryIndex < rowCount; ++entryIndex) {
-        TypeDuck::CandidateEntry fallbackEntry;
-        const TypeDuck::CandidateEntry* entry = nullptr;
-        if (useMatched && entryIndex < static_cast<int>(matchedEntries.size())) {
-            entry = &matchedEntries[entryIndex];
-        } else if (!useMatched && entryIndex < static_cast<int>(allEntries.size())) {
-            entry = &allEntries[entryIndex];
-        }
-        if (!entry) {
-            fallbackEntry.honzi = item.displayText();
-            fallbackEntry.jyutping = L"";
-            entry = &fallbackEntry;
-        }
+    ::SetTextColor(hdc, selected ? highlightTextColor_ : textColor_);
+    const std::wstring text = items_[index].displayText();
+    RECT textRc = rowRc;
+    textRc.left = selRc.right + labelGap_;
+    textRc.right = rowRc.right - cellPadX;
+    ::DrawTextW(hdc, text.c_str(), static_cast<int>(text.length()), &textRc,
+                DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
 
-        int columnX = selRc.right + labelGap_;
-        auto nextColumn = [&](int width) {
-            RECT rc = {columnX, y, columnX + width, y + lineHeight};
-            if (width > 0) {
-                columnX = rc.right + rowInnerGap_;
-            }
-            return rc;
-        };
-        RECT jyutpingRc = nextColumn(jyutpingColumnWidth_);
-        RECT honziRc = nextColumn(honziColumnWidth_);
-        RECT noteRc = nextColumn(noteColumnWidth_);
-        RECT definitionRc = nextColumn(definitionColumnWidth_);
-        RECT indicatorRc = nextColumn(indicatorColumnWidth_);
-        indicatorRc.top = rowRc.top;
-        indicatorRc.bottom = rowRc.bottom;
-        indicatorRc.right = rowRc.right - scalePx(kCandidateIndicatorInsetRight);
-
-        ::SelectObject(hdc, rowMetaFont ? rowMetaFont : (commentFont_ ? commentFont_ : font_));
-        ::SetTextColor(hdc, selected ? commentHighlightColor_ : kPronunciationText);
-        const bool showJyutping = displayPreferences_.shouldShowJyutping(item.candidateInfo.isReverseLookup);
-        if (showJyutping && jyutpingColumnWidth_ > 0) {
-            ::DrawTextW(hdc, entry->jyutping.c_str(), static_cast<int>(entry->jyutping.length()), &jyutpingRc,
-                        DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
-        }
-
-        ::SelectObject(hdc, font_);
-        ::SetTextColor(hdc, selected ? highlightTextColor_ : textColor_);
-        const std::wstring honzi = entry->honzi.empty() ? item.displayText() : entry->honzi;
-        ::DrawTextW(hdc, honzi.c_str(), static_cast<int>(honzi.length()), &honziRc,
-                    DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
-
-        ::SelectObject(hdc, commentFont_ ? commentFont_ : font_);
-        ::SetTextColor(hdc, selected ? commentHighlightColor_ : kSecondaryText);
-        const std::wstring note = (!item.candidateInfo.isReverseLookup || displayPreferences_.showReverseCode)
-                                      ? item.candidateInfo.note
-                                      : L"";
-        if (entryIndex == 0 && !note.empty() && noteColumnWidth_ > 0) {
-            ::DrawTextW(hdc, note.c_str(), static_cast<int>(note.length()), &noteRc,
-                        DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
-        }
-
-        std::wstring definition = entry->definition(displayPreferences_.mainLanguage);
-        if (definition.empty()) {
-            const std::wstring reference = entry->canonicalReference();
-            definition = reference.empty() ? joinDisplayValues(entry->formattedLabels(), L" ") : L"→" + reference;
-        }
-        if (definitionColumnWidth_ > 0) {
-            ::SetTextColor(hdc, selected ? commentHighlightColor_ : kDefinitionText);
-            ::DrawTextW(hdc, definition.c_str(), static_cast<int>(definition.length()), &definitionRc,
-                        DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
-        }
-
-        if (entryIndex == 0 && indicatorColumnWidth_ > 0 &&
-            item.candidateInfo.hasDictionaryEntry(displayPreferences_)) {
-            ::SetTextColor(hdc, selected ? highlightTextColor_ : kSecondaryText);
-            ::DrawTextW(hdc, L"ⓘ", 1, &indicatorRc,
-                        DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-        }
-        y += lineHeight;
-    }
     ::SelectObject(hdc, oldFont);
     if (rowMetaFont) {
         ::DeleteObject(rowMetaFont);
     }
     ::SetTextColor(hdc, oldColor);
-}
-
-void CandidateWindow::paintDictionaryPanel(
-    HDC hdc,
-    const RECT& panelRc,
-    const TypeDuck::CandidateInfo& info) {
-    const int savedDc = ::SaveDC(hdc);
-    ::IntersectClipRect(hdc,
-                        panelRc.left + borderWidth_,
-                        panelRc.top + borderWidth_,
-                        panelRc.right - borderWidth_,
-                        panelRc.bottom - borderWidth_);
-    int y = panelRc.top + scalePx(kDictionaryPanelTopPadding) - dictionaryScrollOffset_;
-
-    for (const auto& entry : info.entries) {
-        if (!entry.isDictionaryEntry(displayPreferences_)) {
-            continue;
-        }
-        paintDictionaryEntry(hdc, y, panelRc, entry, true);
-        if (y > panelRc.bottom + dictionaryScrollOffset_ + scalePx(kDictionaryPaintCullPadding)) {
-            break;
-        }
-    }
-    ::RestoreDC(hdc, savedDc);
-}
-
-void CandidateWindow::paintDictionaryEntry(
-    HDC hdc,
-    int& y,
-    const RECT& panelRc,
-    const TypeDuck::CandidateEntry& entry,
-    bool paint) {
-    HFONT entryFont = createPointFontForDpi(dpiY_, L"DFKai-SB", 32);
-    HFONT pronFont = createPointFontForDpi(dpiY_, L"Segoe UI", 15);
-    HFONT pronTypeFont = createPointFontForDpi(dpiY_, L"Segoe UI", 12);
-    HFONT posFont = createPointFontForDpi(dpiY_, L"Segoe UI", 10);
-    HFONT bodyFont = createPointFontForDpi(dpiY_, L"Segoe UI", 12);
-    HFONT valueFont = createPointFontForDpi(dpiY_, L"Microsoft JhengHei", 12);
-    HFONT captionFont = createPointFontForDpi(dpiY_, L"Segoe UI", 13, FW_SEMIBOLD);
-    HGDIOBJ oldFont = ::SelectObject(hdc, font_);
-
-    const int padX = scalePx(kDictionaryPanelHorizontalPadding);
-    const int padY = scalePx(kDictionaryPanelVerticalPadding);
-    const int titleGap = scalePx(kDictionaryHeaderGap);
-    const int spacing = scalePx(kDictionarySectionSpacing);
-    const int posPadding = scalePx(kDictionaryPosPadding);
-    const int posGap = scalePx(kDictionaryPosGap);
-    const int labelGap = scalePx(kCandidateCommentGap);
-    const int definitionGap = scalePx(kDictionaryDefinitionGap);
-    const int fieldSpacing = scalePx(kDictionaryFieldSpacing);
-    const int fieldGap = scalePx(kDictionaryFieldGap);
-    const int moreLanguagesSpacing = scalePx(kDictionaryMoreLanguagesSpacing);
-    const int entrySpacing = scalePx(kDictionaryEntrySpacing);
-    const int right = panelRc.right - padX;
-
-    std::wstring pronunciation = entry.jyutping;
-    const std::wstring pronType = entry.pronunciationType();
-    const SIZE entrySize = textExtent(hdc, entryFont, entry.honzi);
-    const SIZE pronSize = textExtent(hdc, pronFont, pronunciation);
-    const SIZE pronTypeSize = textExtent(hdc, pronTypeFont, pronType);
-    const int titleHeight = (std::max)(entrySize.cy, (std::max)(pronSize.cy, pronTypeSize.cy));
-    int x = panelRc.left + padX;
-
-    RECT headRc = {x, y, x + entrySize.cx, y + titleHeight};
-    if (paint) {
-        ::SelectObject(hdc, entryFont);
-        ::SetTextColor(hdc, textColor_);
-        ::DrawTextW(hdc, entry.honzi.c_str(), static_cast<int>(entry.honzi.length()), &headRc,
-                    DT_LEFT | DT_BOTTOM | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
-    }
-
-    x = headRc.right + (pronunciation.empty() ? 0 : titleGap);
-    RECT pronunciationRc = {x, y, right, y + titleHeight};
-    if (paint) {
-        ::SelectObject(hdc, pronFont);
-        ::SetTextColor(hdc, kPronunciationText);
-        ::DrawTextW(hdc, pronunciation.c_str(), static_cast<int>(pronunciation.length()), &pronunciationRc,
-                    DT_LEFT | DT_BOTTOM | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
-    }
-    x += pronSize.cx + (pronType.empty() ? 0 : titleGap);
-    RECT pronTypeRc = {x, y, right, y + titleHeight};
-    if (paint) {
-        ::SelectObject(hdc, pronTypeFont);
-        ::SetTextColor(hdc, kSecondaryText);
-        ::DrawTextW(hdc, pronType.c_str(), static_cast<int>(pronType.length()), &pronTypeRc,
-                    DT_LEFT | DT_BOTTOM | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
-    }
-    y += titleHeight + spacing;
-
-    int bodyX = panelRc.left + padX;
-    const int bodyTop = y;
-    const int bodyHeight =
-        (std::max)(scalePx(kDictionaryBodyMinHeight),
-                   static_cast<int>(textExtent(hdc, bodyFont, L"Ag").cy) + posPadding * 2);
-    if (paint) {
-        paintPartOfSpeechPills(
-            hdc, bodyX, bodyTop + scalePx(kDictionaryPillBaselineOffset), right,
-            entry.formattedPartsOfSpeech(), posFont);
-    }
-    if (!entry.formattedPartsOfSpeech().empty()) {
-        bodyX += definitionGap - posGap;
-    }
-
-    std::wstring body;
-    for (const auto& reg : entry.formattedRegister()) {
-        if (!body.empty()) {
-            body += L"  ";
-        }
-        body += reg;
-    }
-    for (const auto& label : entry.formattedLabels()) {
-        if (!body.empty()) {
-            body += std::wstring(labelGap / (std::max)(1, scalePx(kInlineBodySpacingUnit)), L' ');
-        }
-        body += label;
-    }
-    const std::wstring canonical = entry.canonicalReference();
-    if (!canonical.empty()) {
-        if (!body.empty()) {
-            body += L"  ";
-        }
-        body += L"→" + canonical;
-    } else {
-        const std::wstring mainDefinition = entry.definition(displayPreferences_.mainLanguage);
-        if (!mainDefinition.empty()) {
-            if (!body.empty()) {
-                body += L"  ";
-            }
-            body += mainDefinition;
-        }
-    }
-    RECT bodyRc = {bodyX, bodyTop, right, bodyTop + bodyHeight};
-    if (paint) {
-        ::SelectObject(hdc, bodyFont);
-        ::SetTextColor(hdc, kDefinitionText);
-        ::DrawTextW(hdc, body.c_str(), static_cast<int>(body.length()), &bodyRc,
-                    DT_LEFT | DT_TOP | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
-    }
-    y = bodyRc.bottom + spacing;
-
-    int keyWidth = 0;
-    for (const auto& other : entry.otherData()) {
-        keyWidth = (std::max)(keyWidth, static_cast<int>(textExtent(hdc, bodyFont, other.name).cx));
-    }
-    for (const auto& other : entry.otherData()) {
-        const std::vector<std::wstring> values = other.values();
-        const int labelHeight = static_cast<int>(textExtent(hdc, bodyFont, other.name).cy);
-        for (int i = 0, n = static_cast<int>(values.size()); i < n; ++i) {
-            const int lineHeight = (std::max)(labelHeight,
-                                              static_cast<int>(textExtent(hdc, valueFont, values[i]).cy));
-            RECT labelRc = {
-                panelRc.left + padX,
-                y - scalePx(kDictionaryLabelBaselineOffset),
-                panelRc.left + padX + keyWidth,
-                y + lineHeight};
-            RECT valueRc = {labelRc.right + fieldGap, y, right, labelRc.bottom};
-            if (paint && i == 0) {
-                ::SelectObject(hdc, bodyFont);
-                ::SetTextColor(hdc, kSecondaryText);
-                ::DrawTextW(hdc, other.name.c_str(), static_cast<int>(other.name.length()), &labelRc,
-                            DT_RIGHT | DT_TOP | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
-            }
-            if (paint) {
-                ::SelectObject(hdc, valueFont);
-                ::SetTextColor(hdc, textColor_);
-                ::DrawTextW(hdc, values[i].c_str(), static_cast<int>(values[i].length()), &valueRc,
-                            DT_LEFT | DT_TOP | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
-            }
-            y += lineHeight + fieldSpacing;
-        }
-    }
-
-    const auto moreLanguages = entry.otherLanguages(displayPreferences_);
-    if (!moreLanguages.empty()) {
-        y += spacing - fieldSpacing;
-        RECT captionRc = {panelRc.left + padX, y, right, y + textExtent(hdc, captionFont, L"More Languages").cy};
-        const std::wstring caption = L"More Languages";
-        if (paint) {
-            ::SelectObject(hdc, captionFont);
-            ::SetTextColor(hdc, textColor_);
-            ::DrawTextW(hdc, caption.c_str(), static_cast<int>(caption.length()), &captionRc,
-                        DT_LEFT | DT_BOTTOM | DT_SINGLELINE | DT_NOPREFIX);
-        }
-        y = captionRc.bottom + moreLanguagesSpacing;
-        int languageKeyWidth = 0;
-        for (const auto& language : moreLanguages) {
-            languageKeyWidth = (std::max)(languageKeyWidth, static_cast<int>(textExtent(hdc, bodyFont, language.name).cx));
-        }
-        for (const auto& language : moreLanguages) {
-            const int lineHeight = (std::max)(static_cast<int>(textExtent(hdc, bodyFont, language.name).cy),
-                                              static_cast<int>(textExtent(hdc, valueFont, language.value).cy));
-            RECT labelRc = {
-                panelRc.left + padX,
-                y - scalePx(kDictionaryLabelBaselineOffset),
-                panelRc.left + padX + languageKeyWidth,
-                y + lineHeight};
-            RECT valueRc = {labelRc.right + fieldGap, y, right, labelRc.bottom};
-            if (paint) {
-                ::SelectObject(hdc, bodyFont);
-                ::SetTextColor(hdc, kSecondaryText);
-                ::DrawTextW(hdc, language.name.c_str(), static_cast<int>(language.name.length()), &labelRc,
-                            DT_RIGHT | DT_BOTTOM | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
-                ::SelectObject(hdc, valueFont);
-                ::SetTextColor(hdc, kDefinitionText);
-                ::DrawTextW(hdc, language.value.c_str(), static_cast<int>(language.value.length()), &valueRc,
-                            DT_LEFT | DT_BOTTOM | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
-            }
-            y += lineHeight + fieldSpacing;
-        }
-    }
-
-    y += entrySpacing - fieldSpacing + padY;
-    ::SelectObject(hdc, oldFont);
-    ::DeleteObject(captionFont);
-    ::DeleteObject(valueFont);
-    ::DeleteObject(bodyFont);
-    ::DeleteObject(posFont);
-    ::DeleteObject(pronTypeFont);
-    ::DeleteObject(pronFont);
-    ::DeleteObject(entryFont);
-}
-
-void CandidateWindow::paintDictionaryScrollBar(HDC hdc, const RECT& panelRc) {
-    const int maxScroll = dictionaryMaxScrollOffset();
-    if (maxScroll <= 0 || dictionaryPanelHeight_ <= 0 || dictionaryContentHeight_ <= 0) {
-        return;
-    }
-
-    const int trackPad = scalePx(kDictionaryScrollTrackPadding);
-    const int trackWidth = (std::max)(scalePx(kDictionaryScrollTrackWidth), kDictionaryScrollTrackWidth);
-    RECT trackRc = {
-        panelRc.right - borderWidth_ - trackPad,
-        panelRc.top + borderWidth_ + trackPad,
-        panelRc.right - borderWidth_ - trackPad + trackWidth,
-        panelRc.bottom - borderWidth_ - trackPad};
-    const int trackHeight = trackRc.bottom - trackRc.top;
-    if (trackHeight <= 0) {
-        return;
-    }
-    const int thumbHeight = (std::max)(
-        scalePx(kDictionaryScrollThumbMinHeight),
-        ::MulDiv(trackHeight, dictionaryPanelHeight_, dictionaryContentHeight_));
-    const int thumbTravel = (std::max)(0, trackHeight - thumbHeight);
-    const int thumbTop = trackRc.top + (maxScroll > 0 ? ::MulDiv(thumbTravel, dictionaryScrollOffset_, maxScroll) : 0);
-    RECT thumbRc = {trackRc.left, thumbTop, trackRc.right, thumbTop + thumbHeight};
-    HBRUSH trackBrush = ::CreateSolidBrush(kDictionaryScrollTrack);
-    HBRUSH thumbBrush = ::CreateSolidBrush(kDictionaryScrollThumb);
-    ::FillRect(hdc, &trackRc, trackBrush);
-    ::FillRect(hdc, &thumbRc, thumbBrush);
-    ::DeleteObject(thumbBrush);
-    ::DeleteObject(trackBrush);
-}
-
-void CandidateWindow::paintPartOfSpeechPills(
-    HDC hdc,
-    int& x,
-    int y,
-    int maxRight,
-    const std::vector<std::wstring>& values,
-    HFONT pillFont) {
-    if (values.empty()) {
-        return;
-    }
-
-    HGDIOBJ oldFont = ::SelectObject(hdc, pillFont ? pillFont : (commentFont_ ? commentFont_ : font_));
-    HPEN borderPen = ::CreatePen(PS_SOLID, (std::max)(kBorderWidth, scalePx(kBorderWidth)), kPosPillBorder);
-    HBRUSH fillBrush = ::CreateSolidBrush(kPosPillBackground);
-    HGDIOBJ oldPen = ::SelectObject(hdc, borderPen);
-    HGDIOBJ oldBrush = ::SelectObject(hdc, fillBrush);
-    const int gap = scalePx(kDictionaryPillGap);
-    const int padX = scalePx(kDictionaryPosPadding);
-    const int pillHeight = scalePx(kDictionaryPillHeight);
-
-    for (const auto& value : values) {
-        SIZE textSize = {};
-        ::GetTextExtentPoint32W(hdc, value.c_str(), static_cast<int>(value.length()), &textSize);
-        const int pillWidth = static_cast<int>(textSize.cx) + padX * 2;
-        if (x + pillWidth > maxRight) {
-            break;
-        }
-
-        ::RoundRect(hdc, x, y, x + pillWidth, y + pillHeight,
-                    scalePx(kDictionaryPillCornerRadius) * 2,
-                    scalePx(kDictionaryPillCornerRadius) * 2);
-        RECT textRc = {x + padX, y, x + pillWidth - padX, y + pillHeight};
-        ::SetTextColor(hdc, kPosPillText);
-        ::DrawTextW(hdc, value.c_str(), static_cast<int>(value.length()), &textRc,
-                    DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
-        x += pillWidth + gap;
-    }
-
-    ::SelectObject(hdc, oldBrush);
-    ::SelectObject(hdc, oldPen);
-    ::SelectObject(hdc, oldFont);
-    ::DeleteObject(fillBrush);
-    ::DeleteObject(borderPen);
 }
 
 void CandidateWindow::paintPreeditCursor(HDC hdc, const RECT& preeditRc, int cursorX) {
@@ -2308,16 +1545,9 @@ int CandidateWindow::hitTestCandidate(POINT pt) const {
         return -1;
     }
 
-    RECT clientRc = {};
-    ::GetClientRect(hwnd_, &clientRc);
-    const int candidatePanelRight = candidatePanelWidth_ > 0 ? candidatePanelWidth_ : clientRc.right;
     for (int i = 0, n = static_cast<int>(items_.size()); i < n; ++i) {
         RECT rect = {};
         itemRect(i, rect);
-        if (candPerRow_ == 1) {
-            rect.left = borderWidth_ + padX_;
-            rect.right = candidatePanelRight;
-        }
         if (::PtInRect(&rect, pt)) {
             return i;
         }
@@ -2329,13 +1559,12 @@ void CandidateWindow::pageNavigationButtonRect(bool next, RECT& rect) const {
     const int candidatePanelRight = candidatePanelWidth_ > 0
                                         ? candidatePanelWidth_
                                         : padX_ * 2 + minWidth_ + borderWidth_ * 2;
+    const int rowHeight = itemHeight_ > 0 ? itemHeight_ : scalePx(kPageNavPreeditlessHeight);
     rect = {
         candidatePanelRight - borderWidth_ - padX_ - pageNavWidth_,
-        borderWidth_ + padY_,
+        contentTop_,
         candidatePanelRight - borderWidth_ - padX_,
-        borderWidth_ + padY_ +
-            (preedit_.empty() ? scalePx(kPageNavPreeditlessHeight)
-                              : preeditHeight_ + scalePx(kPreeditExtraHeight))};
+        contentTop_ + rowHeight};
     if (next) {
         rect.left += pageNavWidth_ / 2;
     } else {
@@ -2360,7 +1589,7 @@ bool CandidateWindow::isPageNavigationEnabled(bool next) const {
 }
 
 int CandidateWindow::hitTestPageNavigation(POINT pt) const {
-    if (pageNavWidth_ <= 0 || candidatePanelWidth_ <= 0) {
+    if (items_.empty() || pageNavWidth_ <= 0 || candidatePanelWidth_ <= 0) {
         return kPageNavNone;
     }
     RECT prevRc = {};
@@ -2465,40 +1694,23 @@ void CandidateWindow::onMouseMove(WPARAM wp, LPARAM lp) {
         hoveredPageNavDirection_ = navDirection;
         ::InvalidateRect(hwnd_, NULL, FALSE);
     }
-    updateDictionaryRevealFromMovement(pt);
 }
 
 void CandidateWindow::onMouseLeave() {
     trackingMouse_ = false;
     hoveredPageNavDirection_ = kPageNavNone;
     pressedPageNavDirection_ = kPageNavNone;
-    resetDictionaryReveal();
-    recalculateSize();
     if (isVisible()) {
         ::InvalidateRect(hwnd_, NULL, TRUE);
     }
 }
 
 void CandidateWindow::onMouseWheel(WPARAM wp, LPARAM lp) {
+    (void)lp;
     const short delta = GET_WHEEL_DELTA_WPARAM(wp);
     if (delta == 0) {
         return;
     }
-    POINT pt = {GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
-    ::ScreenToClient(hwnd_, &pt);
-    if (dictionaryPanelVisible() && pointInDictionaryPanel(pt)) {
-        if (dictionaryMaxScrollOffset() > 0) {
-            const int scrollLines = (std::max)(1, std::abs(delta) / WHEEL_DELTA);
-            const int scrollStep = scalePx(kDictionaryScrollStep) * scrollLines;
-            dictionaryScrollOffset_ += delta > 0 ? -scrollStep : scrollStep;
-            clampDictionaryScrollOffset();
-            if (isVisible()) {
-                ::InvalidateRect(hwnd_, NULL, TRUE);
-            }
-        }
-        return;
-    }
-    resetDictionaryReveal();
     if (auto* textService = static_cast<Moqi::TextService*>(textService_)) {
         textService->changeCandidatePage(delta > 0);
     }
@@ -2508,157 +1720,12 @@ int CandidateWindow::scalePx(int value) const {
     return ::MulDiv(value, (std::max)(kWindowDpiBaseline, dpiX_), kWindowDpiBaseline);
 }
 
-int CandidateWindow::entryRowCount(const CandidateUiItem& item) const {
-    const auto matched = item.candidateInfo.matchedEntries();
-    if (!matched.empty()) {
-        return (std::max)(1, static_cast<int>(matched.size()));
-    }
-    if (!item.candidateInfo.entries.empty()) {
-        return (std::max)(1, static_cast<int>(item.candidateInfo.entries.size()));
-    }
-    return 1;
-}
-
-int CandidateWindow::effectiveDictionaryIndex() const {
-    if (dictionaryRevealIndex_ >= 0 &&
-        dictionaryRevealIndex_ < static_cast<int>(items_.size())) {
-        return dictionaryRevealIndex_;
-    }
-    if (Ime::isDebugLoggingEnabled()) {
-        if (dictionaryHoverIndex_ >= 0 &&
-            dictionaryHoverIndex_ < static_cast<int>(items_.size())) {
-            return dictionaryHoverIndex_;
-        }
-        if (currentSel_ >= 0 &&
-            currentSel_ < static_cast<int>(items_.size())) {
-            return currentSel_;
-        }
-    }
-    return -1;
-}
-
-bool CandidateWindow::dictionaryPanelVisible() const {
-    const int index = effectiveDictionaryIndex();
-    return index >= 0 && items_[index].candidateInfo.hasDictionaryEntry(displayPreferences_);
-}
-
-int CandidateWindow::dictionaryMaxScrollOffset() const {
-    return (std::max)(0, dictionaryContentHeight_ - dictionaryPanelHeight_);
-}
-
-bool CandidateWindow::pointInDictionaryPanel(POINT pt) const {
-    if (!dictionaryPanelVisible() || dictionaryPanelWidth_ <= 0 || dictionaryPanelHeight_ <= 0) {
-        return false;
-    }
-    RECT clientRc = {};
-    ::GetClientRect(hwnd_, &clientRc);
-    RECT dictionaryRc = {
-        candidatePanelWidth_ + panelGap_,
-        clientRc.top + dictionaryPanelTop_,
-        candidatePanelWidth_ + panelGap_ + dictionaryPanelWidth_,
-        clientRc.top + dictionaryPanelTop_ + dictionaryPanelHeight_};
-    return ::PtInRect(&dictionaryRc, pt) != FALSE;
-}
-
-void CandidateWindow::clampDictionaryScrollOffset() {
-    dictionaryScrollOffset_ = (std::max)(0, (std::min)(dictionaryScrollOffset_, dictionaryMaxScrollOffset()));
-}
-
-void CandidateWindow::resetDictionaryReveal(bool resetMouseTracking) {
-    dictionaryRevealIndex_ = -1;
-    dictionaryHoverIndex_ = -1;
-    dictionaryScrollOffset_ = 0;
-    actualPointerMovementCount_ = 0;
-    if (resetMouseTracking) {
-        hasLastMouseMovePoint_ = false;
-        lastMouseMovePoint_ = {0, 0};
-    }
-}
-
-void CandidateWindow::updateDictionaryRevealFromMovement(POINT pt) {
-    POINT screenPt = pt;
-    if (hwnd_) {
-        ::ClientToScreen(hwnd_, &screenPt);
-    }
-
-    const int hitIndex = hitTestCandidate(pt);
-    if (hitIndex < 0) {
-        if (dictionaryPanelVisible()) {
-            RECT clientRc = {};
-            ::GetClientRect(hwnd_, &clientRc);
-            const int dictionaryLeft = candidatePanelWidth_ + panelGap_;
-            RECT dictionaryBridgeRc = {
-                candidatePanelWidth_ - scalePx(kDictionaryBridgeOverlap),
-                clientRc.top + dictionaryPanelTop_,
-                dictionaryLeft + dictionaryPanelWidth_,
-                clientRc.top + dictionaryPanelTop_ + dictionaryPanelHeight_};
-            if (::PtInRect(&dictionaryBridgeRc, pt)) {
-                return;
-            }
-        }
-        if (dictionaryRevealIndex_ >= 0 || dictionaryHoverIndex_ >= 0) {
-            resetDictionaryReveal();
-            recalculateSize();
-            if (isVisible()) {
-                ::InvalidateRect(hwnd_, NULL, TRUE);
-            }
-        }
-        return;
-    }
-
-    const bool actualPointerMovement =
-        !hasLastMouseMovePoint_ ||
-        lastMouseMovePoint_.x != screenPt.x ||
-        lastMouseMovePoint_.y != screenPt.y;
-    if (!actualPointerMovement) {
-        return;
-    }
-
-    hasLastMouseMovePoint_ = true;
-    lastMouseMovePoint_ = screenPt;
-    ++actualPointerMovementCount_;
-
-    if (actualPointerMovementCount_ < movementRevealThreshold_) {
-        return;
-    }
-
-    if (dictionaryHoverIndex_ != hitIndex) {
-        const int oldEffectiveDictionaryIndex = effectiveDictionaryIndex();
-        const bool oldDictionaryVisible = dictionaryPanelVisible();
-        dictionaryHoverIndex_ = hitIndex;
-        dictionaryRevealIndex_ =
-            items_[hitIndex].candidateInfo.hasDictionaryEntry(displayPreferences_) ? hitIndex : -1;
-        dictionaryScrollOffset_ = 0;
-        actualPointerMovementCount_ = movementRevealThreshold_;
-        const bool dictionaryTargetChanged = oldEffectiveDictionaryIndex != effectiveDictionaryIndex();
-        if (oldDictionaryVisible != dictionaryPanelVisible() || dictionaryTargetChanged) {
-            recalculateSize();
-        }
-        if (isVisible()) {
-            ::InvalidateRect(hwnd_, NULL, TRUE);
-        }
-        return;
-    }
-
-    if (hitIndex >= 0 &&
-        hitIndex < static_cast<int>(items_.size()) &&
-        items_[hitIndex].candidateInfo.hasDictionaryEntry(displayPreferences_) &&
-        dictionaryRevealIndex_ != hitIndex) {
-        dictionaryRevealIndex_ = hitIndex;
-        dictionaryScrollOffset_ = 0;
-        recalculateSize();
-        if (isVisible()) {
-            ::InvalidateRect(hwnd_, NULL, TRUE);
-        }
-    }
-}
-
 void CandidateWindow::itemRect(int index, RECT& rect) const {
-    rect.left = borderWidth_ + padX_ / 2;
-    rect.top = contentTop_;
-    for (int i = 0; i < index && i < static_cast<int>(itemHeights_.size()); ++i) {
-        rect.top += itemHeights_[i] + rowSpacing_;
+    rect.left = borderWidth_ + padX_;
+    for (int i = 0; i < index && i < static_cast<int>(itemWidths_.size()); ++i) {
+        rect.left += itemWidths_[i] + cellGap_;
     }
+    rect.top = contentTop_;
     rect.right = rect.left + itemWidth(index);
     rect.bottom = rect.top + itemHeight(index);
 }
@@ -2667,8 +1734,7 @@ int CandidateWindow::itemWidth(int index) const {
     if (index >= 0 && index < static_cast<int>(itemWidths_.size())) {
         return itemWidths_[index];
     }
-    return selKeyWidth_ + labelGap_ + jyutpingColumnWidth_ + honziColumnWidth_ +
-           noteColumnWidth_ + definitionColumnWidth_ + indicatorColumnWidth_;
+    return selKeyWidth_ + labelGap_ + scalePx(kCandidateCellPadX) * 2 + textWidth_;
 }
 
 int CandidateWindow::itemHeight(int index) const {
@@ -2713,17 +1779,6 @@ void CandidateWindow::applyWindowShape() {
         rc.top + candidatePanelHeight_ + 1,
         borderRadius_ * 2,
         borderRadius_ * 2);
-    if (dictionaryPanelVisible()) {
-        HRGN dictionaryRegion = ::CreateRoundRectRgn(
-            candidatePanelWidth + panelGap_,
-            rc.top + dictionaryPanelTop_,
-            candidatePanelWidth + panelGap_ + dictionaryPanelWidth_ + 1,
-            rc.top + dictionaryPanelTop_ + dictionaryPanelHeight_ + 1,
-            borderRadius_ * 2,
-            borderRadius_ * 2);
-        ::CombineRgn(region, region, dictionaryRegion, RGN_OR);
-        ::DeleteObject(dictionaryRegion);
-    }
     ::SetWindowRgn(hwnd_, region, TRUE);
 }
 

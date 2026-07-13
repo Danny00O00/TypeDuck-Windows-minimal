@@ -26,7 +26,7 @@ constexpr const wchar_t* kLauncherPipeBaseName = L"Launcher";
 constexpr const char* kTypeDuckProfileGuid =
     "{c6e8f5df-6504-44f9-b7cf-17a195373a83}";
 constexpr int kWindowWidth = 940;
-constexpr int kWindowHeight = 620;
+constexpr int kWindowHeight = 460;
 constexpr int kMargin = 22;
 constexpr int kLeftColumnX = 28;
 constexpr int kRightColumnX = 486;
@@ -42,7 +42,7 @@ constexpr int kRowHeight = 28;
 constexpr int kPageTickWidth = 32;
 constexpr int kSettingsButtonWidth = 148;
 constexpr int kSettingsButtonGap = 16;
-constexpr int kSettingsButtonBottomY = 526;
+constexpr int kSettingsButtonBottomY = 366;
 constexpr DWORD kRadioStyle = BS_AUTORADIOBUTTON;
 constexpr DWORD kRadioGroupStartStyle = BS_AUTORADIOBUTTON | WS_GROUP;
 constexpr DWORD kPipeConnectTimeoutMs = 5000;
@@ -460,16 +460,23 @@ class SettingsWindow {
   }
 
   HWND addStatic(const wchar_t* text, int x, int y, int width, int height,
-                 DWORD style = 0) {
+                 DWORD style = 0, bool visible = true) {
+    DWORD windowStyle = WS_CHILD | style;
+    if (visible) {
+      windowStyle |= WS_VISIBLE;
+    }
     return CreateWindowExW(0, L"STATIC", text,
-                           WS_CHILD | WS_VISIBLE | style,
+                           windowStyle,
                            x, y, width, height, window_, nullptr, instance_,
                            nullptr);
   }
 
   HWND addButton(const wchar_t* text, int id, int x, int y, int width,
-                 int height, DWORD style) {
-    DWORD windowStyle = WS_CHILD | WS_VISIBLE | style;
+                 int height, DWORD style, bool visible = true) {
+    DWORD windowStyle = WS_CHILD | style;
+    if (visible) {
+      windowStyle |= WS_VISIBLE;
+    }
     if (id != 0 && (style & BS_GROUPBOX) == 0) {
       windowStyle |= WS_TABSTOP;
     }
@@ -510,26 +517,26 @@ class SettingsWindow {
 
   void createDisplayLanguages() {
     addButton(L"顯示語言 Display Languages", 0, kLeftColumnX, 58,
-              kColumnWidth, kDisplayLanguageGroupHeight, BS_GROUPBOX);
+              kColumnWidth, kDisplayLanguageGroupHeight, BS_GROUPBOX, false);
     addStatic(L"主要語言 Main Language", kDisplayLanguageMainX, 84,
-              kDisplayLanguageMainWidth, 24);
+              kDisplayLanguageMainWidth, 24, 0, false);
     addStatic(L"顯示 Display", kDisplayLanguageDisplayX, 84,
-              kDisplayLanguageDisplayWidth, 24);
+              kDisplayLanguageDisplayWidth, 24, 0, false);
     int y = 114;
     int index = 0;
     for (const auto& option : languageOptions()) {
       addButton(option.label, kMainLanguageBase + index, kDisplayLanguageMainX,
                 y, kDisplayLanguageMainWidth, 24,
-                index == 0 ? kRadioGroupStartStyle : kRadioStyle);
+                index == 0 ? kRadioGroupStartStyle : kRadioStyle, false);
       addButton(L"", kDisplayLanguageBase + index, kDisplayLanguageDisplayX,
-                y, 22, 22, BS_AUTOCHECKBOX);
+                y, 22, 22, BS_AUTOCHECKBOX, false);
       y += kRowHeight;
       ++index;
     }
   }
 
   void createCandidateControls() {
-    int y = 266;
+    int y = 70;
     addStatic(L"每頁候選詞數量 No. of Candidates Per Page", kLeftColumnX, y,
               kColumnWidth, 24);
     pageSizeTrack_ = CreateWindowExW(
@@ -550,13 +557,13 @@ class SettingsWindow {
 
     y += 42;
     addButton(L"候選詞粵拼 Candidates Jyutping", 0, kLeftColumnX, y,
-              kColumnWidth, 116, BS_GROUPBOX);
+              kColumnWidth, 116, BS_GROUPBOX, false);
     addButton(L"顯示 Always Show", kRomanizationAlways, kLeftColumnX + 18, y + 30,
-              190, 24, kRadioGroupStartStyle);
+              190, 24, kRadioGroupStartStyle, false);
     addButton(L"僅反查 Only in Reverse Lookup", kRomanizationReverseOnly,
-              kLeftColumnX + 18, y + 58, 260, 24, kRadioStyle);
+              kLeftColumnX + 18, y + 58, 260, 24, kRadioStyle, false);
     addButton(L"隱藏 Hide", kRomanizationNever, kLeftColumnX + 18, y + 86, 160,
-              24, kRadioStyle);
+              24, kRadioStyle, false);
   }
 
   void createEngineControls() {
@@ -573,15 +580,15 @@ class SettingsWindow {
   }
 
   void createReverseLookupControls() {
-    int y = 288;
+    int y = 240;
     addSectionHeader(L"反查設定 Reverse Lookup Settings", kRightColumnX, y, 330,
                      28);
     addButton(L"顯示完整輸入碼 Show Full Input Code", kShowReverseCode,
-              kRightColumnX, y + 40, 330, 26, BS_AUTOCHECKBOX);
-    addStatic(L"倉頡版本 Cangjie Version", kRightColumnX, y + 90, 230, 24);
-    addButton(L"三代 Version 3", kCangjie3, kRightColumnX, y + 120, 160, 26,
+              kRightColumnX, y + 40, 330, 26, BS_AUTOCHECKBOX, false);
+    addStatic(L"倉頡版本 Cangjie Version", kRightColumnX, y + 40, 230, 24);
+    addButton(L"三代 Version 3", kCangjie3, kRightColumnX, y + 70, 160, 26,
               kRadioGroupStartStyle);
-    addButton(L"五代 Version 5", kCangjie5, kRightColumnX + 180, y + 120, 160,
+    addButton(L"五代 Version 5", kCangjie5, kRightColumnX + 180, y + 70, 160,
               26, kRadioStyle);
   }
 

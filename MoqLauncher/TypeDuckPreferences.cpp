@@ -48,6 +48,7 @@ Json::Value preferencesToJson(const Preferences& preferences) {
   root["enableLearning"] = preferences.enableLearning;
   root["showReverseCode"] = preferences.showReverseCode;
   root["isCangjie5"] = preferences.isCangjie5;
+  root["asciiMode"] = preferences.asciiMode;
   return root;
 }
 
@@ -91,6 +92,9 @@ Preferences preferencesFromJson(const Json::Value& root) {
   if (root["isCangjie5"].isBool()) {
     preferences.isCangjie5 = root["isCangjie5"].asBool();
   }
+  if (root["asciiMode"].isBool()) {
+    preferences.asciiMode = root["asciiMode"].asBool();
+  }
   return preferences;
 }
 
@@ -114,6 +118,7 @@ Preferences defaultPreferences() {
       true,
       true,
       true,
+      false,
   };
 }
 
@@ -146,6 +151,7 @@ std::vector<CapabilityMetadata> defaultCapabilities() {
       {"mainLanguage", true, ""},
       {"isHeiTypeface", true, ""},
       {"showRomanization", true, ""},
+      {"asciiMode", true, ""},
   };
 }
 
@@ -158,6 +164,13 @@ bool preferenceAffectsRime(const std::string& id) {
   return id == "pageSize" || id == "enableCompletion" ||
          id == "enableCorrection" || id == "enableSentence" ||
          id == "enableLearning" || id == "isCangjie5";
+}
+
+// asciiMode is a live engine option: persisted in JSON and pushed to the
+// backend via settings update, but it never patches Rime yaml and never
+// triggers redeploy.
+bool preferenceIsLiveEngineOption(const std::string& id) {
+  return id == "asciiMode";
 }
 
 ValidationResult validatePreferences(const Preferences& preferences) {
@@ -213,6 +226,7 @@ RimeSideEffects rimeSideEffects(const Preferences& preferences) {
   effects.defaultCustomFile = "default.custom.yaml";
   effects.defaultCustomPath = "menu/page_size";
   effects.pageSize = normalized.pageSize;
+  effects.asciiMode = normalized.asciiMode;
   effects.enableCompletion = normalized.enableCompletion;
   effects.enableCorrection = normalized.enableCorrection;
   effects.enableSentence = normalized.enableSentence;
@@ -283,12 +297,29 @@ SaveResult savePreferences(const std::filesystem::path& path,
 
   Json::StreamWriterBuilder builder;
   builder["indentation"] = "  ";
-  std::ofstream stream(path, std::ios::binary | std::ios::trunc);
-  if (!stream.is_open()) {
-    return {false, kApplyFailureMessage};
+  // Write to a sibling temp file and rename over the target so a crash or a
+  // full disk mid-write can never leave a truncated preferences file behind.
+  const auto tempPath =
+      path.parent_path() / (path.filename().string() + ".tmp");
+  {
+    std::ofstream stream(tempPath, std::ios::binary | std::ios::trunc);
+    if (!stream.is_open()) {
+      return {false, kApplyFailureMessage};
+    }
+    stream << Json::writeString(builder, preferencesToJson(result.preferences));
+    stream.flush();
+    if (!stream.good()) {
+      stream.close();
+      std::error_code removeEc;
+      std::filesystem::remove(tempPath, removeEc);
+      return {false, kApplyFailureMessage};
+    }
   }
-  stream << Json::writeString(builder, preferencesToJson(result.preferences));
-  if (!stream.good()) {
+  std::error_code renameEc;
+  std::filesystem::rename(tempPath, path, renameEc);
+  if (renameEc) {
+    std::error_code removeEc;
+    std::filesystem::remove(tempPath, removeEc);
     return {false, kApplyFailureMessage};
   }
   return {true, kJsonSource};

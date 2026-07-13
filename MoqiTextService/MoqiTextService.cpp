@@ -1012,7 +1012,7 @@ void TextService::createCandidateWindow(Ime::EditSession* session) {
 		candidateWindow_->setTextColor(candTextColor_);
 		candidateWindow_->setHighlightTextColor(candHighlightTextColor_);
 		candidateWindow_->setDisplayPreferences(typeDuckDisplayPreferences_);
-		candidateWindow_->setPreeditText(candidatePreedit_);
+		candidateWindow_->setPreeditText(preeditForCandidateWindow());
 		candidateWindow_->setPreeditCursor(candidatePreeditCursor_);
 		candidateWindow_->setPreeditSelection(candidatePreeditSelectionStart_, candidatePreeditSelectionEnd_);
 		auto elementMgr = Ime::ComPtr<ITfUIElementMgr>::queryFrom(threadMgr());
@@ -1077,7 +1077,7 @@ void TextService::updateCandidates(Ime::EditSession* session) {
 
 	applyCandidateAppearanceNow();
 
-	const std::wstring renderedPreedit = candidatePreedit_;
+	const std::wstring renderedPreedit = preeditForCandidateWindow();
 	const bool contentChanged = !isCandidateContentApplied(renderedPreedit);
 	if (contentChanged) {
 		candidateWindow_->clear();
@@ -1150,6 +1150,7 @@ void TextService::updateCandidatesWithoutSession() {
 	applyCandidateAppearanceNow();
 	invalidateCandidateUiCache();
 
+	const std::wstring renderedPreedit = preeditForCandidateWindow();
 	candidateWindow_->clear();
 	candidateWindow_->setUseCursor(candUseCursor_);
 	candidateWindow_->setCandPerRow(candPerRow_);
@@ -1161,7 +1162,7 @@ void TextService::updateCandidatesWithoutSession() {
 	candidateWindow_->setCommentColor(candCommentColor_);
 	candidateWindow_->setCommentHighlightColor(candCommentHighlightColor_);
 	candidateWindow_->setDisplayPreferences(typeDuckDisplayPreferences_);
-	candidateWindow_->setPreeditText(candidatePreedit_);
+	candidateWindow_->setPreeditText(renderedPreedit);
 	candidateWindow_->setPreeditCursor(candidatePreeditCursor_);
 	candidateWindow_->setPreeditSelection(candidatePreeditSelectionStart_, candidatePreeditSelectionEnd_);
 	assert(candidates_.size() <= selKeys_.size());
@@ -1170,7 +1171,7 @@ void TextService::updateCandidatesWithoutSession() {
 	}
 	candidateWindow_->recalculateSize();
 	candidateWindow_->refresh();
-	markCandidateContentApplied(candidatePreedit_);
+	markCandidateContentApplied(renderedPreedit);
 	hasAppliedCandidateCursor_ = false;
 	if (showingCandidates_) {
 		candidateWindow_->Show(shouldShowCandidateWindowUI_ ? TRUE : FALSE);
@@ -1499,7 +1500,7 @@ void TextService::refreshCandidateAppearance() {
 	candidateWindow_->setTextColor(candTextColor_);
 	candidateWindow_->setHighlightTextColor(candHighlightTextColor_);
 	candidateWindow_->setDisplayPreferences(typeDuckDisplayPreferences_);
-	candidateWindow_->setPreeditText(candidatePreedit_);
+	candidateWindow_->setPreeditText(preeditForCandidateWindow());
 	candidateWindow_->setPreeditCursor(candidatePreeditCursor_);
 	candidateWindow_->setPreeditSelection(candidatePreeditSelectionStart_, candidatePreeditSelectionEnd_);
 	candidateWindow_->recalculateSize();
@@ -1541,7 +1542,7 @@ void TextService::applyUiLessOverrideState() {
 		return;
 	}
 	if (candidateWindow_) {
-		candidateWindow_->setPreeditText(candidatePreedit_);
+		candidateWindow_->setPreeditText(preeditForCandidateWindow());
 		candidateWindow_->setPreeditCursor(candidatePreeditCursor_);
 		candidateWindow_->setPreeditSelection(candidatePreeditSelectionStart_, candidatePreeditSelectionEnd_);
 		candidateWindow_->Show(shouldShowCandidateWindowUI_ ? TRUE : FALSE);

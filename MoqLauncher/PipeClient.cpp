@@ -54,6 +54,7 @@ void fillTypeDuckSettingsSnapshot(
     snapshot->set_enable_learning(preferences.enableLearning);
     snapshot->set_show_reverse_code(preferences.showReverseCode);
     snapshot->set_is_cangjie5(preferences.isCangjie5);
+    snapshot->set_ascii_mode(preferences.asciiMode);
     snapshot->set_source("TypeDuckPreferences.json");
     snapshot->set_status_message(message);
     for (const auto& language : preferences.displayLanguages) {
@@ -111,6 +112,9 @@ TypeDuck::Preferences applyUpdateToPreferences(
     }
     if (update.has_is_cangjie5()) {
         next.isCangjie5 = update.is_cangjie5();
+    }
+    if (update.has_ascii_mode()) {
+        next.asciiMode = update.ascii_mode();
     }
     return next;
 }

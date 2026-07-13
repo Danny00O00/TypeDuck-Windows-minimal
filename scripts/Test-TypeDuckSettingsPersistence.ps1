@@ -87,9 +87,12 @@ if ($sourceText -notmatch "displayLanguages[\s\S]*mainLanguage[\s\S]*isHeiTypefa
 if ($sourceText -notmatch "設定未能套用[\s\S]*Settings could not be applied") {
   throw "Apply failure state must be bounded and bilingual."
 }
+if ($sourceText -notmatch "asciiMode") {
+  throw "asciiMode must be part of the persisted TypeDuck JSON preferences model."
+}
 
 if ($Strict) {
-  if ($sourceText -match "displayLanguages[\s\S]{0,120}common:/|mainLanguage[\s\S]{0,120}common:/|isHeiTypeface[\s\S]{0,120}menu/page_size|showRomanization[\s\S]{0,120}common:/|showReverseCode[\s\S]{0,120}common:/") {
+  if ($sourceText -match "displayLanguages[\s\S]{0,120}common:/|mainLanguage[\s\S]{0,120}common:/|isHeiTypeface[\s\S]{0,120}menu/page_size|showRomanization[\s\S]{0,120}common:/|showReverseCode[\s\S]{0,120}common:/|asciiMode[\s\S]{0,120}common:/|asciiMode[\s\S]{0,120}menu/page_size") {
     throw "Interface-only settings must not trigger Rime customization."
   }
 }

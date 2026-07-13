@@ -109,6 +109,9 @@ void BackendServer::handleClientMessage(PipeClient *client,
           name_);
       return;
     }
+    // A fresh backend starts in Chinese mode; restore the saved preferences
+    // (including asciiMode) before the first client request reaches it.
+    pushSavedTypeDuckPreferences();
   }
 
   moqi::protocol::ClientRequest backendRequest = request;
@@ -161,6 +164,7 @@ TypeDuck::ApplyResult BackendServer::applyTypeDuckPreferences(
   update->set_enable_sentence(effects.enableSentence);
   update->set_enable_learning(effects.enableLearning);
   update->set_is_cangjie5(effects.isCangjie5);
+  update->set_ascii_mode(effects.asciiMode);
 
   std::string framedMessage;
   if (!Proto::serializeMessageBounded(
@@ -173,8 +177,11 @@ TypeDuck::ApplyResult BackendServer::applyTypeDuckPreferences(
 }
 
 TypeDuck::ApplyResult BackendServer::requestTypeDuckDeploy() {
-  if (!isProcessRunning() && !startProcess()) {
-    return {false, "TypeDuck 後端未能啟動 / TypeDuck backend could not start"};
+  if (!isProcessRunning()) {
+    if (!startProcess()) {
+      return {false, "TypeDuck 後端未能啟動 / TypeDuck backend could not start"};
+    }
+    pushSavedTypeDuckPreferences();
   }
   if (stdinPipe_ == nullptr) {
     return {false,
@@ -196,6 +203,29 @@ TypeDuck::ApplyResult BackendServer::requestTypeDuckDeploy() {
 
   stdinPipe_->write(std::move(framedMessage));
   return {true, ""};
+}
+
+void BackendServer::persistTypeDuckAsciiMode(bool asciiMode) {
+  const auto path = TypeDuck::defaultPreferencesPath();
+  auto loaded = TypeDuck::loadPreferences(path);
+  if (loaded.preferences.asciiMode == asciiMode) {
+    return;
+  }
+  loaded.preferences.asciiMode = asciiMode;
+  const auto saved = TypeDuck::savePreferences(path, loaded.preferences);
+  if (!saved.ok) {
+    logger()->warn("Failed to persist TypeDuck ascii mode for backend {}", name_);
+  }
+}
+
+void BackendServer::pushSavedTypeDuckPreferences() {
+  const auto loaded = TypeDuck::loadPreferences(TypeDuck::defaultPreferencesPath());
+  const auto result =
+      applyTypeDuckPreferences(TypeDuck::rimeSideEffects(loaded.preferences));
+  if (!result.ok) {
+    logger()->warn("TypeDuck preferences re-push after backend start failed: {}",
+                   result.message);
+  }
 }
 
 uv::Pipe *BackendServer::createStdinPipe() {
@@ -290,7 +320,13 @@ bool BackendServer::startProcess() {
 
 bool BackendServer::restartProcess() {
   terminateProcess(false);
-  return startProcess();
+  if (!startProcess()) {
+    return false;
+  }
+  // Crash/timeout recovery loses the backend's in-memory input mode; restore
+  // it from the persisted preferences before clients resume typing.
+  pushSavedTypeDuckPreferences();
+  return true;
 }
 
 void BackendServer::terminateProcess(bool notifyClients) {
@@ -407,6 +443,14 @@ void BackendServer::handleBackendReply() {
       stdoutFrameBuf_.clear();
       restartProcess();
       return;
+    }
+
+    // Persist engine-originated input-mode changes (Shift toggle, mode icon)
+    // before routing: replies to dead or stale clients are dropped below, but
+    // the mode change they carry must still reach TypeDuckPreferences.json.
+    if (response.has_typeduck_settings_update() &&
+        response.typeduck_settings_update().has_ascii_mode()) {
+      persistTypeDuckAsciiMode(response.typeduck_settings_update().ascii_mode());
     }
 
     const bool isLauncherTrayDeployResponse =

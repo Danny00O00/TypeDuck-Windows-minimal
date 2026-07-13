@@ -20,6 +20,7 @@ struct Preferences {
   bool enableLearning = true;
   bool showReverseCode = true;
   bool isCangjie5 = true;
+  bool asciiMode = false;
 };
 
 struct PreferenceDescriptor {
@@ -58,6 +59,8 @@ struct RimeSideEffects {
   std::string commonCustomFile;
   std::string commonPatchKey;
   std::vector<std::string> commonPatches;
+  // Live engine option forwarded in the backend push; never mapped to yaml patches.
+  bool asciiMode = false;
 };
 
 struct ApplyResult {
@@ -73,6 +76,7 @@ std::vector<CapabilityMetadata> defaultCapabilities();
 std::vector<std::string> interfaceOnlyPreferenceIdsForTest();
 
 bool preferenceAffectsRime(const std::string& id);
+bool preferenceIsLiveEngineOption(const std::string& id);
 ValidationResult validatePreferences(const Preferences& preferences);
 RimeSideEffects rimeSideEffects(const Preferences& preferences);
 

@@ -79,17 +79,12 @@ $productionAnchors = @(
   @{ Path = $windowSource; Pattern = 'paintInputBuffer|drawInputBuffer'; Description = 'input buffer rendering' },
   @{ Path = $windowSource; Pattern = 'paintPageNavigation|drawPageNavigation'; Description = 'page navigation rendering' },
   @{ Path = $windowSource; Pattern = 'paintCandidateRow|drawCandidateRow'; Description = 'source-backed candidate row rendering' },
-  @{ Path = $windowSource; Pattern = 'paintDictionaryPanel|drawDictionaryPanel'; Description = 'dictionary side panel rendering' },
-  @{ Path = $windowSource; Pattern = 'paintPartOfSpeechPills|drawPartOfSpeechPills'; Description = 'part-of-speech pill rendering' },
-  @{ Path = $windowSource; Pattern = 'kPosPillBorder|kPosPillText|kPosPillBackground'; Description = 'part-of-speech pill theme colors' },
-  @{ Path = $windowSource; Pattern = 'More Languages'; Description = 'dictionary More Languages rendering' },
-  @{ Path = $windowSource; Pattern = 'entryRowCount|matchedEntries'; Description = 'multi-row candidate detail rendering' },
-  @{ Path = $windowSource; Pattern = 'movementRevealThreshold_|kMovementRevealThreshold'; Description = 'movement-triggered dictionary reveal threshold' },
-  @{ Path = $windowSource; Pattern = 'actualPointerMovement|mouseMoveCount|dictionaryMoveCount'; Description = 'actual pointer movement counter' },
-  @{ Path = $windowHeader; Pattern = 'dictionaryRevealIndex_|dictionaryPanel'; Description = 'dictionary panel state' },
-  @{ Path = $windowHeader; Pattern = 'lastMouseMovePoint_|lastPointerPoint'; Description = 'stationary pointer tracking' },
+  @{ Path = $windowSource; Pattern = 'kCandidateCellMaxTextWidth'; Description = 'horizontal cell long-candidate width cap' },
+  @{ Path = $windowSource; Pattern = 'kCandidateCellMinTextWidth'; Description = 'horizontal cell uniform-cap floor' },
+  @{ Path = $windowSource; Pattern = 'rcWork|GetMonitorInfoW'; Description = 'work-area width constraint for the horizontal row' },
+  @{ Path = $windowSource; Pattern = 'SM_CXFULLSCREEN'; Description = 'work-area width fallback metric' },
+  @{ Path = $windowSource; Pattern = 'DT_END_ELLIPSIS'; Description = 'long candidate ellipsis truncation' },
   @{ Path = $windowSource; Pattern = 'panel_background|selection_background|input_buffer_background|input_buffer_text|pronunciation_text|definition_text'; Description = 'theme palette role consumption' },
-  @{ Path = $windowSource; Pattern = 'definitionLayout|displayLanguages|mainLanguage|otherLanguages'; Description = 'settings-aware display language layout' }
   @{ Path = $windowSource; Pattern = 'WS_EX_TOOLWINDOW\s*\|\s*WS_EX_TOPMOST\s*\|\s*WS_EX_NOACTIVATE\s*\|\s*WS_EX_LAYERED'; Description = 'blink regression: candidate popup must use a layered window so separated panels do not expose an unpainted black/solid first frame' }
   @{ Path = $windowSource; Pattern = '(?s)UpdateLayeredWindow\([^;]*ULW_COLORKEY'; Description = 'blink regression: candidate popup must present the separated panel surface through layered-window color-key transparency' }
   @{ Path = $windowSource; Pattern = 'transparentOutsidePanels\s*\?\s*kLayeredTransparentColor'; Description = 'blink regression: candidate/dictionary union area outside rounded panels must remain transparent, not white' }
@@ -118,6 +113,11 @@ if ($missing.Count -gt 0) {
   throw "Native TypeDuck candidate rendering anchors missing: $($missing -join ', ')"
 }
 
+Assert-NotContains $windowSource 'paintDictionary|dictionaryRevealIndex_|updateDictionaryRevealFromMovement' "removed dictionary side panel rendering"
+Assert-NotContains $windowHeader 'paintDictionary|dictionaryRevealIndex_|dictionaryPanel|lastMouseMovePoint_' "removed dictionary panel/reveal state"
+Assert-NotContains $windowSource 'jyutpingColumnWidth_|noteColumnWidth_|definitionColumnWidth_|indicatorColumnWidth_' "removed multi-column candidate row layout"
+Assert-NotContains $windowSource 'paintPartOfSpeechPills|kPosPillBorder|kPosPillBackground' "removed part-of-speech pill rendering"
+
 if ($Strict) {
   Assert-NotContains $windowSource 'L"\\\[" \+ part|body \+= L"\\\["|\\[[^\\]]*形容詞' "literal bracketed POS rendering in native candidate window"
   Assert-NotContains $previewSource 'L"\\\[" \+ pos|body \+= L"\\\["|\\[[^\\]]*形容詞' "literal bracketed POS rendering in preview harness"
@@ -129,20 +129,20 @@ if ($Strict) {
   Assert-Contains $clientSource 'jyutping' "candidate Jyutping fallback preservation"
   Assert-Contains $windowHeader 'std::wstring inputCode' "candidate UI fallback input-code field"
   Assert-Contains $windowSource 'CandidateInfo\(\s*label,\s*item\.text,\s*rawComment,\s*item\.inputCode\)' "candidate info input-code fallback wiring"
-  Assert-Contains $windowSource 'jyutpingContentWidth|definitionContentWidth|honziContentWidth' "candidate window must measure visible content columns"
+  Assert-Contains $windowSource 'honziContentWidth' "candidate window must measure visible candidate text content"
   Assert-Contains $windowSource 'minWidth_\s*=\s*scalePx\(kCandidateMinWidth\)' "candidate window must keep compact content-sized minimum width"
-  Assert-Contains $windowSource 'entryIndex\s*==\s*0\s*&&\s*!note\.empty\(\)\s*&&\s*noteColumnWidth_' "candidate notes must follow TypeDuck Web first-row reverse-code visibility without depending on Jyutping display"
-  Assert-Contains $windowSource 'nextColumn\(jyutpingColumnWidth_\)' "candidate row painter must use measured dynamic columns"
+  Assert-Contains $windowSource 'selKeyWidth_\s*\+\s*labelGap_' "candidate cell layout must reserve measured selection-key column"
   Assert-Contains $clientSource 'selStart|selEnd|setCandidatePreeditSelection' "candidate input buffer must consume backend active selection range"
   Assert-Contains $windowHeader 'preeditSelectionStart_|preeditSelectionEnd_' "candidate window must store split input-buffer selection"
   Assert-Contains $windowSource 'const std::wstring before|const std::wstring active|const std::wstring after' "input buffer must draw before/active/after spans separately"
   Assert-Contains $windowSource 'CreateRoundRectRgn\(activeRc\.left' "input buffer highlight must be limited to the active span"
   Assert-NotContains $clientSource 'setCandBackgroundColor\(color\)|setCandHighlightColor\(color\)|setCandTextColor\(color\)|setCandHighlightTextColor\(color\)|setCandCommentColor\(color\)|setCandCommentHighlightColor\(color\)' "backend-driven native candidate theme color override"
-  Assert-NotContains $textServiceHeader 'setPreeditText\(effectiveInlinePreedit\(\) \? L"" : candidatePreedit_\)|setPreeditCursor\(effectiveInlinePreedit\(\) \? 0 : candidatePreeditCursor_\)' "inline preedit hiding the popup input buffer in header"
-  Assert-NotContains $textServiceSource 'setPreeditText\(effectiveInlinePreedit\(\) \? L"" : candidatePreedit_\)|setPreeditCursor\(effectiveInlinePreedit\(\) \? 0 : candidatePreeditCursor_\)' "inline preedit hiding the popup input buffer in source"
+  Assert-Contains $textServiceHeader '(?s)preeditForCandidateWindow\(\)\s*const\s*\{.*?effectiveExternalPreedit\(\)\s*\?\s*candidatePreedit_' "popup input-code strip must be gated to the external-preedit fallback"
+  Assert-Contains $textServiceHeader 'setPreeditText\(preeditForCandidateWindow\(\)\)' "header preedit push sites must route through the gate"
+  Assert-Contains $textServiceSource 'setPreeditText\(preeditForCandidateWindow\(\)\)|preeditForCandidateWindow\(\);' "source preedit push sites must route through the gate"
   Assert-Contains $windowSource 'WS_EX_NOACTIVATE|MA_NOACTIVATE|SWP_NOACTIVATE' "focus-safe non-activating popup behavior"
   Assert-Contains $windowSource 'TrackMouseEvent|WM_MOUSELEAVE' "mouse leave tracking"
-  Assert-Contains $windowSource '(?s)pointInDictionaryPanel\(pt\).*?dictionaryMaxScrollOffset\(\) > 0.*?return;.*?changeCandidatePage' "dictionary panel must consume mouse wheel even when its content cannot scroll"
+  Assert-Contains $windowSource '(?s)void\s+CandidateWindow::onMouseWheel\([^)]*\)\s*\{.*?changeCandidatePage\(delta > 0\)' "mouse wheel over the candidate row must always page"
   Assert-Contains $windowSource 'hitTestPageNavigation' "candidate page navigation must have mouse hit testing"
   Assert-Contains $windowSource 'candidateHasPrevious|candidateHasNext' "candidate page navigation must consume backend page availability"
   Assert-Contains $clientSource 'setCandidateHasPrevious|setCandidateHasNext' "backend page availability must be applied to the text service"

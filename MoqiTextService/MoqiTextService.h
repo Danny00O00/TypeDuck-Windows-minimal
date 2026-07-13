@@ -263,6 +263,12 @@ public:
 		return !effectiveInlinePreedit();
 	}
 
+	// TSF inline composition already renders the input code at the caret; the
+	// popup input-code strip is only shown for external-preedit fallback hosts.
+	std::wstring preeditForCandidateWindow() const {
+		return effectiveExternalPreedit() ? candidatePreedit_ : std::wstring();
+	}
+
 	bool tsfCandidateUiEnabled() const {
 		return !autoDisableTsfCandidateUi_;
 	}
@@ -278,7 +284,7 @@ public:
 	void setInlinePreedit(bool inlinePreedit) {
 		inlinePreedit_ = inlinePreedit;
 		if (candidateWindow_) {
-			candidateWindow_->setPreeditText(candidatePreedit_);
+			candidateWindow_->setPreeditText(preeditForCandidateWindow());
 			candidateWindow_->setPreeditCursor(candidatePreeditCursor_);
 			invalidateCandidateUiCache();
 		}
@@ -317,7 +323,7 @@ public:
 			candidatePreeditSelectionEnd_ = static_cast<int>(candidatePreedit_.length());
 		}
 		if (candidateWindow_) {
-			candidateWindow_->setPreeditText(candidatePreedit_);
+			candidateWindow_->setPreeditText(preeditForCandidateWindow());
 			candidateWindow_->setPreeditCursor(candidatePreeditCursor_);
 			candidateWindow_->setPreeditSelection(candidatePreeditSelectionStart_, candidatePreeditSelectionEnd_);
 		}

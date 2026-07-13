@@ -89,6 +89,10 @@ private:
 
 	void handleBackendReply();
 
+	void persistTypeDuckAsciiMode(bool asciiMode);
+
+	void pushSavedTypeDuckPreferences();
+
 private:
 	PipeServer* pipeServer_;
 	std::string name_;
