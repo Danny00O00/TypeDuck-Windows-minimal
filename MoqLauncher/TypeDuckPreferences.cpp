@@ -8,6 +8,11 @@
 
 #include <json/json.h>
 
+#ifdef _WIN32
+#include <Windows.h>
+#include <ShlObj.h>
+#endif
+
 namespace Moqi::TypeDuck {
 
 namespace {
@@ -98,9 +103,32 @@ Preferences preferencesFromJson(const Json::Value& root) {
   return preferences;
 }
 
-std::string roamingAppDataPath() {
+// Windows keeps the user profile path in UTF-16. The narrow CRT environment is a
+// lossy ANSI-code-page copy of it ('?' replaces anything the active code page
+// cannot encode), so a profile such as C:\Users\陳大文 on a non-CJK code page
+// would yield an invalid path and every load/save would fail. Read the wide
+// environment first (scripts and tests still override it), then fall back to the
+// roaming known folder. Other platforms keep std::getenv("APPDATA") so the
+// portable unit test build (Tests/TypeDuckSettings) keeps compiling and can
+// redirect the path.
+std::filesystem::path roamingAppDataPath() {
+#ifdef _WIN32
+  if (const wchar_t* wideValue = ::_wgetenv(L"APPDATA");
+      wideValue != nullptr && wideValue[0] != L'\0') {
+    return std::filesystem::path(wideValue);
+  }
+  wchar_t* roamingPath = nullptr;
+  if (FAILED(::SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, nullptr, &roamingPath)) ||
+      roamingPath == nullptr) {
+    return {};
+  }
+  std::filesystem::path result{roamingPath};
+  ::CoTaskMemFree(roamingPath);
+  return result;
+#else
   const char* value = std::getenv("APPDATA");
-  return value != nullptr ? value : "";
+  return value != nullptr ? std::filesystem::path(value) : std::filesystem::path();
+#endif
 }
 
 } // namespace
@@ -258,7 +286,7 @@ std::filesystem::path defaultPreferencesPath() {
   if (roaming.empty()) {
     return std::filesystem::path(kPreferencesFileName);
   }
-  return std::filesystem::path(roaming) / "TypeDuckIME" / kPreferencesFileName;
+  return roaming / "TypeDuckIME" / kPreferencesFileName;
 }
 
 ValidationResult loadPreferences(const std::filesystem::path& path) {

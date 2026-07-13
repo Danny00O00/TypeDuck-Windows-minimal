@@ -126,12 +126,16 @@ DpiPair dpiFromScreenDc() {
     return dpi;
 }
 
-DpiPair dpiFromMonitor(HMONITOR monitor) {
-    DpiPair dpi = dpiFromScreenDc();
+// Resolves the DPI of one specific monitor. Overwrites |dpi| and returns true only when a
+// real per-monitor value was obtained, so the caller can tell "no per-monitor DPI
+// available" apart from "this monitor really is at 96 DPI". The result must NOT be folded
+// into a max() with the system DPI -- see dpiForOwnerWindow().
+bool dpiFromMonitor(HMONITOR monitor, DpiPair& dpi) {
     if (!monitor) {
-        return dpi;
+        return false;
     }
 
+    bool resolved = false;
     HMODULE shcore = ::LoadLibraryW(L"Shcore.dll");
     if (shcore) {
         auto getDpiForMonitor = reinterpret_cast<GetDpiForMonitorProc>(
@@ -140,42 +144,66 @@ DpiPair dpiFromMonitor(HMONITOR monitor) {
             UINT x = 0;
             UINT y = 0;
             if (SUCCEEDED(getDpiForMonitor(monitor, 0, &x, &y)) && x > 0 && y > 0) {
-                dpi.x = (std::max)(dpi.x, static_cast<int>(x));
-                dpi.y = (std::max)(dpi.y, static_cast<int>(y));
+                dpi.x = (std::max)(kWindowDpiBaseline, static_cast<int>(x));
+                dpi.y = (std::max)(kWindowDpiBaseline, static_cast<int>(y));
+                resolved = true;
             }
         }
 
-        auto getScaleFactorForMonitor = reinterpret_cast<GetScaleFactorForMonitorProc>(
-            ::GetProcAddress(shcore, "GetScaleFactorForMonitor"));
-        if (getScaleFactorForMonitor) {
-            int scalePercent = 100;
-            if (SUCCEEDED(getScaleFactorForMonitor(monitor, &scalePercent)) && scalePercent > 0) {
-                const int scaledDpi = ::MulDiv(kWindowDpiBaseline, scalePercent, 100);
-                dpi.x = (std::max)(dpi.x, scaledDpi);
-                dpi.y = (std::max)(dpi.y, scaledDpi);
+        if (!resolved) {
+            auto getScaleFactorForMonitor = reinterpret_cast<GetScaleFactorForMonitorProc>(
+                ::GetProcAddress(shcore, "GetScaleFactorForMonitor"));
+            if (getScaleFactorForMonitor) {
+                int scalePercent = 100;
+                if (SUCCEEDED(getScaleFactorForMonitor(monitor, &scalePercent)) && scalePercent > 0) {
+                    const int scaledDpi = (std::max)(
+                        kWindowDpiBaseline, ::MulDiv(kWindowDpiBaseline, scalePercent, 100));
+                    dpi.x = scaledDpi;
+                    dpi.y = scaledDpi;
+                    resolved = true;
+                }
             }
         }
         ::FreeLibrary(shcore);
     }
-    return dpi;
+    return resolved;
 }
 
-DpiPair dpiForOwnerWindow(HWND owner) {
+// |preferredMonitor| is the monitor the popup is actually placed on (the caret anchor); it
+// may be null before the first anchor is known, in which case the owner window's monitor is
+// used. The candidate popup is per-monitor DPI aware, so Windows does not bitmap-scale it
+// for us and the monitor it lands on is authoritative.
+DpiPair dpiForOwnerWindow(HWND owner, HMONITOR preferredMonitor) {
+    // GetDpiForMonitor reports MDT_EFFECTIVE_DPI relative to the calling thread's awareness,
+    // so a system-aware host would otherwise still report the primary display's DPI.
+    ThreadDpiAwarenessScope dpiScope;
+
+    // The per-monitor DPI is assigned, deliberately NOT max()'d against the system DPI:
+    // with a 200% primary and a 100% secondary display, a max() chain makes the primary's
+    // system DPI a floor and renders the popup at double size on the secondary.
+    // dpiFromScreenDc() survives only as the last-resort fallback for pre-Win8.1 hosts where
+    // neither GetDpiForMonitor/GetScaleFactorForMonitor nor GetDpiForWindow is available.
     DpiPair dpi = dpiFromScreenDc();
+    if (dpiFromMonitor(preferredMonitor, dpi)) {
+        return dpi;
+    }
+
     HWND target = owner ? owner : ::GetForegroundWindow();
-    if (target) {
-        auto getDpiForWindow = reinterpret_cast<GetDpiForWindowProc>(
-            ::GetProcAddress(::GetModuleHandleW(L"user32.dll"), "GetDpiForWindow"));
-        if (getDpiForWindow) {
-            const UINT windowDpi = getDpiForWindow(target);
-            if (windowDpi > 0) {
-                dpi.x = (std::max)(dpi.x, static_cast<int>(windowDpi));
-                dpi.y = (std::max)(dpi.y, static_cast<int>(windowDpi));
-            }
+    if (!target) {
+        return dpi;
+    }
+    if (dpiFromMonitor(::MonitorFromWindow(target, MONITOR_DEFAULTTONEAREST), dpi)) {
+        return dpi;
+    }
+
+    auto getDpiForWindow = reinterpret_cast<GetDpiForWindowProc>(
+        ::GetProcAddress(::GetModuleHandleW(L"user32.dll"), "GetDpiForWindow"));
+    if (getDpiForWindow) {
+        const UINT windowDpi = getDpiForWindow(target);
+        if (windowDpi > 0) {
+            dpi.x = (std::max)(kWindowDpiBaseline, static_cast<int>(windowDpi));
+            dpi.y = (std::max)(kWindowDpiBaseline, static_cast<int>(windowDpi));
         }
-        const DpiPair monitorDpi = dpiFromMonitor(::MonitorFromWindow(target, MONITOR_DEFAULTTONEAREST));
-        dpi.x = (std::max)(dpi.x, monitorDpi.x);
-        dpi.y = (std::max)(dpi.y, monitorDpi.y);
     }
     return dpi;
 }
@@ -506,7 +534,9 @@ CandidateWindow::CandidateWindow(Ime::TextService* service, Ime::EditSession* se
       ownedCommentFont_(nullptr),
       draggingWindow_(false),
       trackingMouse_(false),
-      useCursor_(false) {
+      useCursor_(false),
+      hasAnchorRect_(false),
+      anchorRect_{} {
     margin_ = 0;
 
     const HWND rawOwner = resolveCandidateOwnerWindow(session);
@@ -609,11 +639,9 @@ STDMETHODIMP CandidateWindow::GetCount(UINT* puCount) {
     if (!puCount) {
         return E_INVALIDARG;
     }
-    const auto* service = productTextService(textService_);
-    const int totalCount = service != nullptr ? service->candidateTotalCount() : 0;
-    *puCount = totalCount > 0
-        ? static_cast<UINT>(totalCount)
-        : static_cast<UINT>(items_.size());
+    // items_ is a single materialised page: the backend ships exactly the current page
+    // and never the other pages, so advertise only what GetString() can actually serve.
+    *puCount = static_cast<UINT>(items_.size());
     return S_OK;
 }
 
@@ -622,11 +650,8 @@ STDMETHODIMP CandidateWindow::GetSelection(UINT* puIndex) {
         return E_INVALIDARG;
     }
     assert(currentSel_ >= 0);
-    const auto* service = productTextService(textService_);
-    const int pageSize = service != nullptr ? service->candidatePageSize() : 0;
-    const int pageIndex = service != nullptr ? service->candidatePageIndex() : 0;
-    const int pageStart = pageSize > 0 ? pageIndex * pageSize : 0;
-    *puIndex = static_cast<UINT>(pageStart + currentSel_);
+    // Page-local, matching GetCount()/GetString()'s index space.
+    *puIndex = static_cast<UINT>(currentSel_);
     return S_OK;
 }
 
@@ -634,19 +659,12 @@ STDMETHODIMP CandidateWindow::GetString(UINT uIndex, BSTR* pbstr) {
     if (!pbstr) {
         return E_INVALIDARG;
     }
-    const auto* service = productTextService(textService_);
-    const int pageSize = service != nullptr ? service->candidatePageSize() : 0;
-    const int pageIndex = service != nullptr ? service->candidatePageIndex() : 0;
-    const UINT pageStart =
-        pageSize > 0 ? static_cast<UINT>(pageIndex * pageSize) : 0;
-    const UINT localIndex = pageSize > 0 ? uIndex - pageStart : uIndex;
-    if (pageSize > 0 && uIndex < pageStart) {
+    if (uIndex >= items_.size()) {
         return E_INVALIDARG;
     }
-    if (localIndex >= items_.size()) {
-        return E_INVALIDARG;
-    }
-    *pbstr = SysAllocString(items_[localIndex].combinedText().c_str());
+    // Selection key + Chinese characters only: hosts that draw their own candidate list
+    // must render the same honzi-only text our own panel does, without the definition.
+    *pbstr = SysAllocString(items_[uIndex].displayText().c_str());
     return S_OK;
 }
 
@@ -654,24 +672,13 @@ STDMETHODIMP CandidateWindow::GetPageIndex(UINT* puIndex, UINT uSize, UINT* puPa
     if (!puPageCnt) {
         return E_INVALIDARG;
     }
-    const auto* service = productTextService(textService_);
-    const int pageSize = service != nullptr ? service->candidatePageSize() : 0;
-    const int totalCount = service != nullptr ? service->candidateTotalCount() : 0;
-    const UINT effectivePageSize =
-        pageSize > 0 ? static_cast<UINT>(pageSize)
-                     : (std::max<UINT>)(1, static_cast<UINT>(items_.size()));
-    const UINT effectiveTotal =
-        totalCount > 0 ? static_cast<UINT>(totalCount)
-                       : static_cast<UINT>(items_.size());
-    *puPageCnt = (std::max<UINT>)(1, (effectiveTotal + effectivePageSize - 1) /
-                                         effectivePageSize);
+    // items_ is a single materialised page, so expose exactly one page starting at 0.
+    *puPageCnt = 1;
     if (puIndex) {
-        if (uSize < *puPageCnt) {
+        if (uSize < 1u) {
             return E_INVALIDARG;
         }
-        for (UINT i = 0; i < *puPageCnt; ++i) {
-            puIndex[i] = i * effectivePageSize;
-        }
+        puIndex[0] = 0;
     }
     return S_OK;
 }
@@ -688,20 +695,8 @@ STDMETHODIMP CandidateWindow::GetCurrentPage(UINT* puPage) {
     if (!puPage) {
         return E_INVALIDARG;
     }
-    const auto* service = productTextService(textService_);
-    const int pageSize = service != nullptr ? service->candidatePageSize() : 0;
-    const int totalCount = service != nullptr ? service->candidateTotalCount() : 0;
-    const UINT effectivePageSize =
-        pageSize > 0 ? static_cast<UINT>(pageSize)
-                     : (std::max<UINT>)(1, static_cast<UINT>(items_.size()));
-    const UINT effectiveTotal =
-        totalCount > 0 ? static_cast<UINT>(totalCount)
-                       : static_cast<UINT>(items_.size());
-    const UINT pageCount = (std::max<UINT>)(
-        1, (effectiveTotal + effectivePageSize - 1) / effectivePageSize);
-    const UINT pageIndex =
-        service != nullptr ? static_cast<UINT>(service->candidatePageIndex()) : 0;
-    *puPage = (std::min)(pageIndex, pageCount - 1);
+    // Single materialised page (see GetPageIndex()).
+    *puPage = 0;
     return S_OK;
 }
 
@@ -939,6 +934,17 @@ void CandidateWindow::syncOwner(Ime::EditSession* session) {
     if (dpiChanged) {
         refreshOwnedFonts();
         recalculateSize();
+        // recalculateSize() -> resizeForLayout() resizes the layered popup with SWP_NOREDRAW
+        // (blink regression fix: no intermediate redraw frames), so the resize queues no
+        // repaint, and applyWindowShape() is a no-op for layered windows. The layered surface
+        // would therefore keep the pre-DPI-change bitmap at the old size until the next
+        // keystroke. Push one fresh surface at the new size, exactly like Show() does before
+        // the first visible frame -- a single deterministic present, so no blink is possible.
+        if (usesLayeredPresentation()) {
+            presentLayeredSurface();
+        } else {
+            ::InvalidateRect(hwnd_, NULL, TRUE);
+        }
     }
 
     std::wostringstream log;
@@ -957,8 +963,22 @@ void CandidateWindow::syncOwner(Ime::EditSession* session) {
     logCandidateWindowState(L"[CandidateWindow::syncOwner.state]", hwnd_);
 }
 
+void CandidateWindow::setAnchorRect(const RECT& rect) {
+    anchorRect_ = rect;
+    hasAnchorRect_ = true;
+}
+
+HMONITOR CandidateWindow::anchorMonitor() const {
+    if (!hasAnchorRect_) {
+        return nullptr;
+    }
+    // Same lookup clampCandidateWindowToWorkArea() uses to place the popup, so the DPI and
+    // the work-area width always describe the monitor the popup actually lands on.
+    return ::MonitorFromRect(&anchorRect_, MONITOR_DEFAULTTONEAREST);
+}
+
 bool CandidateWindow::updateDpiFromOwner(HWND owner) {
-    const DpiPair dpi = dpiForOwnerWindow(owner ? owner : hwnd_);
+    const DpiPair dpi = dpiForOwnerWindow(owner ? owner : hwnd_, anchorMonitor());
     if (dpi.x == dpiX_ && dpi.y == dpiY_) {
         return false;
     }
@@ -1101,10 +1121,17 @@ void CandidateWindow::recalculateSize() {
     // scope is active, matching every scalePx()-derived width below.
     int workAreaWidth = 0;
     {
-        const HWND owner = hwnd_
-            ? reinterpret_cast<HWND>(::GetWindowLongPtr(hwnd_, GWLP_HWNDPARENT))
-            : nullptr;
-        HMONITOR monitor = ::MonitorFromWindow(owner ? owner : hwnd_, MONITOR_DEFAULTTONEAREST);
+        // Size against the monitor the popup is actually PLACED on (the caret anchor, the
+        // same monitor clampCandidateWindowToWorkArea() clamps to and the same one the DPI
+        // in scalePx() came from), not the owner's monitor: an owner window straddling two
+        // displays is measured on its majority monitor while the caret may sit on the other.
+        HMONITOR monitor = anchorMonitor();
+        if (monitor == nullptr) {
+            const HWND owner = hwnd_
+                ? reinterpret_cast<HWND>(::GetWindowLongPtr(hwnd_, GWLP_HWNDPARENT))
+                : nullptr;
+            monitor = ::MonitorFromWindow(owner ? owner : hwnd_, MONITOR_DEFAULTTONEAREST);
+        }
         MONITORINFO monitorInfo = {};
         monitorInfo.cbSize = sizeof(monitorInfo);
         if (monitor != nullptr && ::GetMonitorInfoW(monitor, &monitorInfo)) {

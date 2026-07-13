@@ -407,6 +407,7 @@ private:
 	void invalidateCandidateUiCache();
 	bool isCandidateContentApplied(const std::wstring& renderedPreedit) const;
 	void markCandidateContentApplied(const std::wstring& renderedPreedit);
+	bool candidateAnchorRect(Ime::EditSession* session, RECT* rect);
 	bool moveCandidateWindowToInputRect(Ime::EditSession* session, const wchar_t* reason, bool throttleSamePosition);
 
 	bool ensureClientForCurrentProfile(const wchar_t* reason);

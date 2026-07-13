@@ -1073,6 +1073,13 @@ void TextService::updateCandidates(Ime::EditSession* session) {
 	if (!candidateWindow_) {
 		return;
 	}
+	// Push the anchor BEFORE syncOwner(): syncOwner() re-resolves the DPI, and both that and
+	// the work-area width in recalculateSize() below must come from the monitor the popup is
+	// actually placed on (the caret's), not the owner window's monitor.
+	RECT anchorRect{};
+	if (candidateAnchorRect(session, &anchorRect)) {
+		candidateWindow_->setAnchorRect(anchorRect);
+	}
 	candidateWindow_->syncOwner(session);
 
 	applyCandidateAppearanceNow();
@@ -1149,6 +1156,13 @@ void TextService::updateCandidatesWithoutSession() {
 	reloadTypeDuckDisplayPreferences();
 	applyCandidateAppearanceNow();
 	invalidateCandidateUiCache();
+
+	// Session-less path: fall back to the shipped GUITHREADINFO/foreground-window anchor so
+	// recalculateSize() still measures the monitor the popup is placed on.
+	RECT anchorRect{};
+	if (candidateAnchorRect(nullptr, &anchorRect)) {
+		candidateWindow_->setAnchorRect(anchorRect);
+	}
 
 	const std::wstring renderedPreedit = preeditForCandidateWindow();
 	candidateWindow_->clear();
@@ -1236,6 +1250,19 @@ void TextService::markCandidateContentApplied(const std::wstring& renderedPreedi
 	appliedCandidates_ = candidates_;
 	appliedSelKeys_ = selKeys_;
 	hasAppliedCandidateContent_ = true;
+}
+
+// Screen rect the candidate popup is anchored to. Same resolution order as
+// moveCandidateWindowToInputRect(), so the monitor the popup is sized for is the monitor it
+// is then placed on.
+bool TextService::candidateAnchorRect(Ime::EditSession* session, RECT* rect) {
+	if (rect == nullptr) {
+		return false;
+	}
+	if (session != nullptr && inputRect(session, rect)) {
+		return true;
+	}
+	return fallbackAnchorRect(rect);
 }
 
 bool TextService::moveCandidateWindowToInputRect(Ime::EditSession* session, const wchar_t* reason, bool throttleSamePosition) {

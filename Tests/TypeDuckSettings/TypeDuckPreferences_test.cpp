@@ -184,6 +184,56 @@ TEST(TypeDuckPreferences, AsciiModeIsLiveEngineOptionWithNoRimePatches) {
             interfaceOnly.end());
 }
 
+TEST(TypeDuckPreferences, HiddenControlsSurviveSaveReloadAlongsideAsciiMode) {
+  // The display-language, candidates-jyutping and full-input-code controls are
+  // hidden from the settings UI, so nothing in the UI can rewrite them. They
+  // must still round-trip through save+reload, and toggling asciiMode (the one
+  // preference the Shift key writes behind the user's back) must not disturb
+  // them. Every value below is deliberately NON-default, so a field that gets
+  // dropped or reset would fall back to a different value and fail the compare.
+  const auto root = makeTempDir("typeduck-hidden-controls-test");
+  const auto path = root / "preferences.json";
+  {
+    std::ofstream stream(path, std::ios::binary);
+    stream << R"({
+  "displayLanguages": ["eng", "hin", "urd"],
+  "mainLanguage": "hin",
+  "pageSize": 6,
+  "isHeiTypeface": false,
+  "showRomanization": "reverse_only",
+  "enableCompletion": true,
+  "enableCorrection": false,
+  "enableSentence": true,
+  "enableLearning": true,
+  "showReverseCode": false,
+  "isCangjie5": true,
+  "asciiMode": true
+})";
+  }
+
+  const std::vector<std::string> expectedLanguages{"eng", "hin", "urd"};
+
+  const auto first = Moqi::TypeDuck::loadPreferences(path);
+  ASSERT_TRUE(first.ok) << first.message;
+  EXPECT_EQ(first.preferences.displayLanguages, expectedLanguages);
+  EXPECT_EQ(first.preferences.mainLanguage, "hin");
+  EXPECT_EQ(first.preferences.showRomanization, "reverse_only");
+  EXPECT_FALSE(first.preferences.showReverseCode);
+  EXPECT_TRUE(first.preferences.asciiMode);
+
+  // Save the loaded preferences straight back, exactly as the asciiMode
+  // persistence path does, then reload from disk.
+  ASSERT_TRUE(Moqi::TypeDuck::savePreferences(path, first.preferences).ok);
+
+  const auto second = Moqi::TypeDuck::loadPreferences(path);
+  ASSERT_TRUE(second.ok) << second.message;
+  EXPECT_EQ(second.preferences.displayLanguages, expectedLanguages);
+  EXPECT_EQ(second.preferences.mainLanguage, "hin");
+  EXPECT_EQ(second.preferences.showRomanization, "reverse_only");
+  EXPECT_FALSE(second.preferences.showReverseCode);
+  EXPECT_TRUE(second.preferences.asciiMode);
+}
+
 TEST(TypeDuckPreferences, FailedApplyDoesNotCorruptJsonSourceOfTruth) {
   // D-44 and D-47: apply is batched, deploy failures return bounded bilingual
   // status, and JSON remains the readable source of truth.

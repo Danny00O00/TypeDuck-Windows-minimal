@@ -92,6 +92,10 @@ public:
     void setCommentHighlightColor(COLORREF color);
     void setDisplayPreferences(TypeDuck::DisplayPreferences preferences);
     void syncOwner(Ime::EditSession* session);
+    // Screen rect of the caret the popup is anchored to. Both the DPI and the work-area
+    // width are resolved from the monitor this rect lands on, i.e. the monitor the popup
+    // is actually placed on, which is not necessarily the owner window's monitor.
+    void setAnchorRect(const RECT& rect);
     void recalculateSize() override;
     void refresh();
 
@@ -126,6 +130,9 @@ private:
     bool usesLayeredPresentation() const;
     void resizeForLayout(int width, int height);
     int scalePx(int value) const;
+    // Monitor the popup is placed on, derived from the caret anchor; null until an anchor
+    // has been pushed, in which case callers fall back to the owner window's monitor.
+    HMONITOR anchorMonitor() const;
     bool updateDpiFromOwner(HWND owner);
     void refreshOwnedFonts();
 
@@ -183,6 +190,8 @@ private:
     bool draggingWindow_;
     bool trackingMouse_;
     bool useCursor_;
+    bool hasAnchorRect_;
+    RECT anchorRect_;
 };
 
 } // namespace Moqi

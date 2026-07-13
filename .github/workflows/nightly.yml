@@ -91,6 +91,95 @@ jobs:
             -RimeDataSource "$env:GITHUB_WORKSPACE\TypeDuck-HK-schema" `
             -ProtobufRoot "$env:PROTOBUF_ROOT"
 
+      - name: Run TypeDuck PowerShell guards
+        working-directory: ${{ github.workspace }}/TypeDuck-Windows
+        run: |
+          $repoRoot = Join-Path $env:GITHUB_WORKSPACE "TypeDuck-Windows"
+          $backendRoot = Join-Path $env:GITHUB_WORKSPACE "TypeDuck-Windows-backend"
+
+          # Static source/contract guards only (no GUI, no installed IME, no staged runtime).
+          # Test-TypeDuckCandidateData.ps1 runs WITHOUT -Strict on purpose: its strict mode
+          # demands a Debug-configuration test binary while CI builds Release. The GoogleTest
+          # step below executes that suite directly instead.
+          $guards = @(
+            @{ Name = "Test-TypeDuckProtocolContract.ps1";    Arguments = @("-RepoRoot", $repoRoot, "-Strict") },
+            @{ Name = "Test-TypeDuckCandidateData.ps1";       Arguments = @("-RepoRoot", $repoRoot) },
+            @{ Name = "Test-TypeDuckCandidateWindow.ps1";     Arguments = @("-RepoRoot", $repoRoot, "-Strict") },
+            @{ Name = "Test-TypeDuckSettingsAboutUi.ps1";     Arguments = @("-RepoRoot", $repoRoot, "-BackendRoot", $backendRoot, "-Strict") },
+            @{ Name = "Test-TypeDuckSettingsPersistence.ps1"; Arguments = @("-RepoRoot", $repoRoot, "-BackendRoot", $backendRoot, "-Strict") }
+          )
+
+          $failed = @()
+          foreach ($guard in $guards) {
+            $guardPath = Join-Path $repoRoot "scripts\$($guard.Name)"
+            $guardArgs = $guard.Arguments
+            Write-Host "== $($guard.Name) $($guardArgs -join ' ')"
+            pwsh -NoProfile -ExecutionPolicy Bypass -File $guardPath @guardArgs
+            if ($LASTEXITCODE -ne 0) {
+              $failed += $guard.Name
+            }
+          }
+
+          if ($failed.Count -gt 0) {
+            throw "TypeDuck PowerShell guards failed: $($failed -join ', ')"
+          }
+
+      - name: Run GoogleTest suites
+        working-directory: ${{ github.workspace }}/TypeDuck-Windows
+        run: |
+          $buildDir = Join-Path $env:GITHUB_WORKSPACE "TypeDuck-Windows\build-vs32"
+          if (-not (Test-Path -LiteralPath $buildDir -PathType Container)) {
+            throw "CMake build directory not found: $buildDir"
+          }
+
+          # scripts/build.ps1 configures build-vs32 (Win32) and builds the whole solution in
+          # Release, so every Tests/ target is already part of ALL_BUILD and no extra build is
+          # needed.
+          #
+          # ctest is deliberately NOT used here. The top-level CMakeLists.txt never calls
+          # enable_testing() -- only libIME2/CMakeLists.txt does, and that is a child directory
+          # scope, so CMAKE_TESTING_ENABLED never reaches the root or the sibling Tests/ dirs.
+          # CMake therefore emits no CTestTestfile.cmake at the build root, and
+          # `ctest --test-dir build-vs32` prints "No tests were found!!!" and exits 0 -- a green
+          # step that runs zero tests. Running the binaries directly is the only way to actually
+          # execute these suites; they return non-zero on failure exactly like ctest would.
+          #
+          # To switch to ctest, add enable_testing() to the top-level CMakeLists.txt (before the
+          # add_subdirectory(Tests/...) calls); this step can then become
+          #   ctest --test-dir build-vs32 -C Release --output-on-failure --no-tests=error
+          $testTargets = @(
+            "TypeDuckCandidateInfo_test",
+            "ProtoFraming_test",
+            "ProtocolRecovery_test",
+            "TypeDuckPreferences_test"
+          )
+
+          $failed = @()
+          foreach ($target in $testTargets) {
+            $exe = Get-ChildItem -LiteralPath $buildDir -Recurse -File -Filter "$target.exe" |
+              Select-Object -First 1
+            if (-not $exe) {
+              throw "Test binary not found: $target.exe under $buildDir"
+            }
+            Write-Host "== $($exe.FullName)"
+            & $exe.FullName
+            if ($LASTEXITCODE -ne 0) {
+              $failed += $target
+            }
+          }
+
+          if ($failed.Count -gt 0) {
+            throw "GoogleTest suites failed: $($failed -join ', ')"
+          }
+
+      - name: Run backend Go tests
+        working-directory: ${{ github.workspace }}/TypeDuck-Windows-backend
+        run: |
+          go test ./...
+          if ($LASTEXITCODE -ne 0) {
+            throw "Backend go test failed."
+          }
+
       - name: Prepare installer asset name
         working-directory: ${{ github.workspace }}/TypeDuck-Windows
         run: |

@@ -91,6 +91,23 @@ $productionAnchors = @(
   @{ Path = $windowSource; Pattern = '(?s)void\s+CandidateWindow::applyWindowShape\(\).*?usesLayeredPresentation\(\).*?return;.*?SetWindowRgn'; Description = 'blink regression: layered candidate popup must bypass SetWindowRgn region churn' }
   @{ Path = $windowSource; Pattern = '(?s)STDMETHODIMP\s+CandidateWindow::Show\(BOOL bShow\).*?presentLayeredSurface\(\).*?show\(\)'; Description = 'blink regression: candidate popup must paint the layered surface before first visible show' }
   @{ Path = $windowSource; Pattern = '(?s)void\s+CandidateWindow::resizeForLayout\(int width, int height\).*?SWP_NOREDRAW'; Description = 'blink regression: layered candidate popup resize must suppress intermediate redraw frames' }
+
+  # --- Multi-monitor sizing (F9) ---
+  # recalculateSize() used to pick the monitor from the OWNER window while placement
+  # (clampCandidateWindowToWorkArea) picked it from the caret rect via MonitorFromRect.
+  # For a host window straddling two displays those are different monitors, so the popup
+  # was width-capped against one monitor's work area and then moved onto another.
+  # Sizing must now consult the same caret anchor rect the placement step uses.
+  @{ Path = $windowHeader; Pattern = 'setAnchorRect'; Description = 'multi-monitor sizing: candidate window must expose a caret anchor-rect setter (setAnchorRect)' }
+  @{ Path = $windowSource; Pattern = 'CandidateWindow::setAnchorRect'; Description = 'multi-monitor sizing: setAnchorRect must be defined on the candidate window' }
+  @{ Path = $windowSource; Pattern = 'MonitorFromRect'; Description = 'multi-monitor sizing: candidate window layout must resolve its monitor from the caret anchor rect (MonitorFromRect), not only from the owner window' }
+  @{ Path = $textServiceSource; Pattern = 'setAnchorRect'; Description = 'multi-monitor sizing: text service must push the caret anchor rect into the candidate window before sizing' }
+
+  # --- Per-monitor DPI precedence (F8) ---
+  # dpiForOwnerWindow() must query the target monitor from a per-monitor-aware thread
+  # context; GetDpiForMonitor's MDT_EFFECTIVE_DPI is awareness-dependent, so without the
+  # scope a system-aware host still reports the primary monitor's DPI.
+  @{ Path = $windowSource; Pattern = '(?s)DpiPair\s+dpiForOwnerWindow\([^)]*\)\s*\{[\s\S]{0,600}?ThreadDpiAwarenessScope'; Description = 'per-monitor DPI: dpiForOwnerWindow must resolve DPI from a per-monitor-aware thread context (ThreadDpiAwarenessScope)' }
 )
 
 $missing = @()
@@ -117,6 +134,12 @@ Assert-NotContains $windowSource 'paintDictionary|dictionaryRevealIndex_|updateD
 Assert-NotContains $windowHeader 'paintDictionary|dictionaryRevealIndex_|dictionaryPanel|lastMouseMovePoint_' "removed dictionary panel/reveal state"
 Assert-NotContains $windowSource 'jyutpingColumnWidth_|noteColumnWidth_|definitionColumnWidth_|indicatorColumnWidth_' "removed multi-column candidate row layout"
 Assert-NotContains $windowSource 'paintPartOfSpeechPills|kPosPillBorder|kPosPillBackground' "removed part-of-speech pill rendering"
+
+# Per-monitor DPI precedence (F8): the target monitor's DPI is authoritative. Folding it
+# into a max() with the system (primary-monitor) DPI pins the popup to the primary's
+# scale, so a 200% primary + 100% secondary renders the popup double-size on the
+# secondary. The max()-against-system-DPI fold must not come back.
+Assert-NotContains $windowSource '\(std::max\)\(dpi\.x,\s*monitorDpi\.x\)|\(std::max\)\(dpi\.y,\s*monitorDpi\.y\)' "system-DPI floor folded over the per-monitor DPI"
 
 if ($Strict) {
   Assert-NotContains $windowSource 'L"\\\[" \+ part|body \+= L"\\\["|\\[[^\\]]*形容詞' "literal bracketed POS rendering in native candidate window"

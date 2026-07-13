@@ -230,6 +230,49 @@ Assert-Ordered $window @(
   "kMainLanguageBase",
   "kDisplayLanguageBase"
 ) "Display/main-language label alignment"
+
+# --- Hidden-but-live settings controls -------------------------------------------------
+# The display-language group, the Candidates-Jyutping radios and the full-input-code
+# (kShowReverseCode) checkbox are intentionally created WITHOUT WS_VISIBLE: the backend
+# still honours the persisted values, but the UI does not expose them yet. These anchors
+# make sure (a) the controls stay hidden, and (b) their state still round-trips through
+# applyStateToControls()/collectState(), so hiding never silently drops a preference.
+
+# The visibility switch itself: WS_VISIBLE is only ever OR-ed in when the caller opts in.
+Assert-Text $window '(?s)HWND\s+addStatic\([^)]*bool\s+visible\s*=\s*true\)[\s\S]{0,240}?if\s*\(visible\)\s*\{\s*windowStyle\s*\|=\s*WS_VISIBLE;' "addStatic must gate WS_VISIBLE behind an explicit visible flag."
+Assert-Text $window '(?s)HWND\s+addButton\([^)]*bool\s+visible\s*=\s*true\)[\s\S]{0,240}?if\s*\(visible\)\s*\{\s*windowStyle\s*\|=\s*WS_VISIBLE;' "addButton must gate WS_VISIBLE behind an explicit visible flag."
+
+# Display-language group: group box, both column headers, the main-language radios and the
+# per-language display checkboxes must all be created hidden.
+Assert-Text $window 'addButton\(L"顯示語言 Display Languages",[^;]*BS_GROUPBOX,\s*false\)' "Display-language group box must be created hidden (no WS_VISIBLE)."
+Assert-Text $window 'addStatic\(L"主要語言 Main Language",[^;]*,\s*false\)' "Main-language column header must be created hidden (no WS_VISIBLE)."
+Assert-Text $window 'addStatic\(L"顯示 Display",[^;]*,\s*false\)' "Display column header must be created hidden (no WS_VISIBLE)."
+Assert-Text $window 'addButton\(option\.label,\s*kMainLanguageBase \+ index,[^;]*,\s*false\)' "Main-language radios must be created hidden (no WS_VISIBLE)."
+Assert-Text $window 'addButton\(L"",\s*kDisplayLanguageBase \+ index,[^;]*BS_AUTOCHECKBOX,\s*false\)' "Display-language checkboxes must be created hidden (no WS_VISIBLE)."
+
+# Candidates-Jyutping group box and its three radios must all be created hidden.
+Assert-Text $window 'addButton\(L"候選詞粵拼 Candidates Jyutping",[^;]*BS_GROUPBOX,\s*false\)' "Candidates-Jyutping group box must be created hidden (no WS_VISIBLE)."
+Assert-Text $window 'addButton\(L"顯示 Always Show",\s*kRomanizationAlways,[^;]*,\s*false\)' "Jyutping always-show radio must be created hidden (no WS_VISIBLE)."
+Assert-Text $window 'addButton\(L"僅反查 Only in Reverse Lookup",\s*kRomanizationReverseOnly,[^;]*,\s*false\)' "Jyutping reverse-lookup-only radio must be created hidden (no WS_VISIBLE)."
+Assert-Text $window 'addButton\(L"隱藏 Hide",\s*kRomanizationNever,[^;]*,\s*false\)' "Jyutping hide radio must be created hidden (no WS_VISIBLE)."
+
+# Full input code (kShowReverseCode) checkbox must be created hidden.
+Assert-Text $window 'addButton\(L"顯示完整輸入碼 Show Full Input Code",\s*kShowReverseCode,[^;]*BS_AUTOCHECKBOX,\s*false\)' "Full-input-code checkbox must be created hidden (no WS_VISIBLE)."
+
+# Round-trip: hidden controls must still be loaded from and collected back into preferences.
+Assert-Text $window 'void\s+applyStateToControls\(\)' "Settings window must keep applyStateToControls() as the preference-to-control load path."
+Assert-Text $window 'void\s+collectState\(\)' "Settings window must keep collectState() as the control-to-preference save path."
+Assert-Text $window 'CheckDlgButton\(window_,\s*kDisplayLanguageBase \+ index,' "applyStateToControls must still load the hidden display-language checkboxes."
+Assert-Text $window 'CheckDlgButton\(window_,\s*kMainLanguageBase \+ index,' "applyStateToControls must still load the hidden main-language radios."
+Assert-Text $window 'CheckDlgButton\(window_,\s*romanizationControl\(preferences_\.showRomanization\)' "applyStateToControls must still load the hidden Jyutping radios."
+Assert-Text $window 'CheckDlgButton\(window_,\s*kShowReverseCode,' "applyStateToControls must still load the hidden full-input-code checkbox."
+Assert-Text $window 'IsDlgButtonChecked\(window_,\s*kDisplayLanguageBase \+ index\)\s*==\s*BST_CHECKED' "collectState must still collect the hidden display-language checkboxes."
+Assert-Text $window 'IsDlgButtonChecked\(window_,\s*kMainLanguageBase \+ index\)\s*==\s*BST_CHECKED' "collectState must still collect the hidden main-language radios."
+Assert-Text $window 'IsDlgButtonChecked\(window_,\s*kRomanizationReverseOnly\)\s*==\s*BST_CHECKED' "collectState must still collect the hidden Jyutping reverse-lookup-only radio."
+Assert-Text $window 'IsDlgButtonChecked\(window_,\s*kRomanizationNever\)\s*==\s*BST_CHECKED' "collectState must still collect the hidden Jyutping hide radio."
+Assert-Text $window 'preferences_\.showReverseCode\s*=\s*[\s\S]{0,80}?IsDlgButtonChecked\(window_,\s*kShowReverseCode\)\s*==\s*BST_CHECKED' "collectState must still collect the hidden full-input-code checkbox."
+# ---------------------------------------------------------------------------------------
+
 Assert-Text $window "addPageSizeTickLabels" "Candidate page-size control must render fixed tick labels."
 foreach ($tick in 4..10) {
   Assert-Text $window "L`"$tick`"" "Candidate page-size control must show tick label $tick."
